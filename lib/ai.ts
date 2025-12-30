@@ -3,19 +3,22 @@ import { generateText, generateObject, streamText } from "ai";
 import { z } from "zod";
 
 // Create z.ai client (OpenAI-compatible API)
+// Z.ai Coding Plan endpoint: https://api.z.ai/api/coding/paas/v4/chat/completions
 const zai = createOpenAI({
-  baseURL: process.env.ZAI_API_BASE_URL || "https://api.z.ai/v1",
+  baseURL: process.env.ZAI_API_BASE_URL || "https://api.z.ai/api/coding/paas/v4",
   apiKey: process.env.ZAI_API_KEY,
+  compatibility: "strict", // Use standard OpenAI chat completions format
 });
 
 // Model configurations
+// Available models: glm-4.7, glm-4-flash, glm-4
 export const models = {
   // Cheaper model for initial extraction (high volume)
   extraction: zai("glm-4-flash"),
   // Medium model for filtering and scoring
   filtering: zai("glm-4-flash"),
   // Strong model for clustering and reconstruction
-  reasoning: zai("glm-4"),
+  reasoning: zai("glm-4.7"),
 };
 
 // Global system instruction for all prompts

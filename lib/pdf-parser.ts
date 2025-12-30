@@ -1,4 +1,4 @@
-import { PDFParse } from "pdf-parse";
+import { extractText, getDocumentProxy } from "unpdf";
 
 export interface ParsedPDF {
   text: string;
@@ -10,37 +10,37 @@ export interface ParsedPDF {
   };
 }
 
-export interface PageText {
-  pageNumber: number;
-  text: string;
-}
-
 /**
  * Parse a PDF file and extract its text content
  */
 export async function parsePDF(buffer: Buffer): Promise<ParsedPDF> {
-  // Convert Buffer to Uint8Array for pdf-parse
-  const data = new Uint8Array(buffer);
+  // Create a copy of the buffer data to avoid detachment issues
+  const uint8Array = new Uint8Array(buffer);
 
-  const parser = new PDFParse({ data });
+  // Get document proxy for metadata
+  const pdf = await getDocumentProxy(new Uint8Array(uint8Array));
 
-  // Get text from all pages
-  const textResult = await parser.getText();
-  const fullText = textResult.pages.map((page) => page.text).join("\n\n");
+  // Extract text from all pages (create another copy for extractText)
+  const result = await extractText(new Uint8Array(uint8Array), {
+    mergePages: true,
+  });
 
   // Get metadata
-  const info = await parser.getInfo();
+  const metadata = await pdf.getMetadata().catch(() => null);
+  const info = metadata?.info as Record<string, unknown> | undefined;
 
-  // Access info dictionary for metadata
-  const infoDict = info.info as Record<string, unknown> | undefined;
+  // When mergePages is true, text is a string; otherwise it's an array
+  const textContent = Array.isArray(result.text)
+    ? result.text.join("\n\n")
+    : result.text;
 
   return {
-    text: cleanText(fullText),
-    numPages: textResult.pages.length,
+    text: cleanText(textContent),
+    numPages: result.totalPages,
     metadata: {
-      title: infoDict?.Title as string | undefined,
-      author: infoDict?.Author as string | undefined,
-      creator: infoDict?.Creator as string | undefined,
+      title: info?.Title as string | undefined,
+      author: info?.Author as string | undefined,
+      creator: info?.Creator as string | undefined,
     },
   };
 }
