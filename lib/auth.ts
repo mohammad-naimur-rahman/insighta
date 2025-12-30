@@ -47,6 +47,12 @@ export async function getCurrentUser(): Promise<JwtPayload | null> {
   return verifyToken(token);
 }
 
+// =============================================================================
+// Google OAuth helpers - COMMENTED OUT
+// Uncomment when you have GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET configured
+// =============================================================================
+
+/*
 // Google OAuth URL builder
 export function getGoogleAuthUrl(): string {
   const rootUrl = "https://accounts.google.com/o/oauth2/v2/auth";
@@ -120,3 +126,4 @@ export async function getGoogleUserInfo(
 
   return response.json();
 }
+*/

@@ -3,7 +3,8 @@
     "allow": [
       "Bash(cat:*)",
       "Bash(bun add:*)",
-      "Bash(bun run build)"
+      "Bash(bun run build)",
+      "Bash(npx shadcn@latest add tabs:*)"
     ]
   }
 }
