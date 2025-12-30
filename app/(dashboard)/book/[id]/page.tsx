@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import {
@@ -52,31 +52,11 @@ export default function BookDetailPage() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Fetch book data
-  const fetchBook = async () => {
-    try {
-      const response = await fetch(`/api/book/${bookId}`);
-      const data = await response.json();
-
-      if (data.success) {
-        setBook(data.data);
-
-        // Fetch output if completed
-        if (data.data.status === "completed") {
-          fetchOutput();
-        }
-      } else {
-        setError(data.error || "Failed to fetch book");
-      }
-    } catch {
-      setError("Failed to fetch book");
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  // Track if we should be polling
+  const isPollingRef = useRef(false);
 
   // Fetch output
-  const fetchOutput = async () => {
+  const fetchOutput = useCallback(async () => {
     try {
       const response = await fetch(`/api/book/${bookId}/output`);
       const data = await response.json();
@@ -87,7 +67,39 @@ export default function BookDetailPage() {
     } catch (err) {
       console.error("Failed to fetch output:", err);
     }
-  };
+  }, [bookId]);
+
+  // Fetch book data
+  const fetchBook = useCallback(async () => {
+    try {
+      const response = await fetch(`/api/book/${bookId}`);
+      const data = await response.json();
+
+      if (data.success) {
+        setBook(data.data);
+
+        // Check if we should continue polling
+        const status = data.data.status;
+        isPollingRef.current =
+          status !== "uploaded" &&
+          status !== "completed" &&
+          status !== "failed";
+
+        // Fetch output if completed
+        if (status === "completed") {
+          fetchOutput();
+        }
+      } else {
+        setError(data.error || "Failed to fetch book");
+        isPollingRef.current = false;
+      }
+    } catch {
+      setError("Failed to fetch book");
+      isPollingRef.current = false;
+    } finally {
+      setIsLoading(false);
+    }
+  }, [bookId, fetchOutput]);
 
   // Start processing
   const startProcessing = async () => {
@@ -100,7 +112,12 @@ export default function BookDetailPage() {
       });
       const data = await response.json();
 
-      if (!data.success) {
+      if (data.success) {
+        // Enable polling to track progress
+        isPollingRef.current = true;
+        // Fetch immediately to get updated status
+        fetchBook();
+      } else {
         setError(data.error || "Processing failed");
       }
     } catch {
@@ -132,24 +149,19 @@ export default function BookDetailPage() {
     }
   };
 
-  // Poll for updates while processing
+  // Initial fetch and polling setup
   useEffect(() => {
     fetchBook();
 
     // Poll every 3 seconds if processing
     const interval = setInterval(() => {
-      if (
-        book &&
-        book.status !== "uploaded" &&
-        book.status !== "completed" &&
-        book.status !== "failed"
-      ) {
+      if (isPollingRef.current) {
         fetchBook();
       }
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [bookId, book?.status]);
+  }, [bookId, fetchBook]);
 
   if (isLoading) {
     return (

@@ -64,7 +64,7 @@ export function ProcessingStatus({
             >
               {/* Status icon */}
               <div className="flex-shrink-0">
-                {isCompleted ? (
+                {isCompleted || (isCurrent && currentStatus === "completed") ? (
                   <IconCheck className="h-5 w-5 text-green-500" />
                 ) : isCurrent ? (
                   <IconLoader className="h-5 w-5 text-primary animate-spin" />
@@ -79,7 +79,8 @@ export function ProcessingStatus({
               <span
                 className={cn(
                   "text-sm",
-                  isCurrent && "font-medium text-primary",
+                  isCurrent && currentStatus !== "completed" && "font-medium text-primary",
+                  isCurrent && currentStatus === "completed" && "font-medium text-green-600",
                   isCompleted && "text-muted-foreground",
                   isPending && "text-muted-foreground/60"
                 )}
