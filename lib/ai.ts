@@ -1,5 +1,5 @@
 import { createOpenAI } from "@ai-sdk/openai";
-import { generateText, generateObject, streamText } from "ai";
+import { generateText, streamText } from "ai";
 import { z } from "zod";
 
 // Create z.ai client (OpenAI-compatible API)
@@ -7,18 +7,18 @@ import { z } from "zod";
 const zai = createOpenAI({
   baseURL: process.env.ZAI_API_BASE_URL || "https://api.z.ai/api/coding/paas/v4",
   apiKey: process.env.ZAI_API_KEY,
-  compatibility: "strict", // Use standard OpenAI chat completions format
 });
 
 // Model configurations
-// Available models: glm-4.7, glm-4-flash, glm-4
+// Use .chat() to force chat completions API instead of responses API
+// Available models: GLM-4.7, GLM-4.5, GLM-4.5-Air
 export const models = {
   // Cheaper model for initial extraction (high volume)
-  extraction: zai("glm-4-flash"),
+  extraction: zai.chat("GLM-4.5-Air"),
   // Medium model for filtering and scoring
-  filtering: zai("glm-4-flash"),
+  filtering: zai.chat("GLM-4.5-Air"),
   // Strong model for clustering and reconstruction
-  reasoning: zai("glm-4.7"),
+  reasoning: zai.chat("GLM-4.7"),
 };
 
 // Global system instruction for all prompts
@@ -26,7 +26,10 @@ export const SYSTEM_INSTRUCTION = `You are not a summarizer.
 You are a signal extraction system.
 If removing something does not reduce understanding, remove it.`;
 
-// Generate structured output
+/**
+ * Generate structured output using text generation with JSON parsing
+ * This is more compatible with non-OpenAI providers that don't support native structured output
+ */
 export async function generateStructured<T>(
   schema: z.ZodSchema<T>,
   prompt: string,
@@ -38,14 +41,228 @@ export async function generateStructured<T>(
   const model = models[options?.model || "extraction"];
   const system = options?.system || SYSTEM_INSTRUCTION;
 
-  const result = await generateObject({
+  // Add JSON instruction to prompt
+  const schemaDesc = zodToJsonDescription(schema);
+  const jsonPrompt = `${prompt}
+
+IMPORTANT: Respond with ONLY valid JSON. No markdown, no explanation, no code blocks.
+You MUST use EXACTLY the values shown for enum fields - do not use any other values.
+
+Required JSON structure:
+${JSON.stringify(schemaDesc, null, 2)}`;
+
+  const result = await generateText({
     model,
-    schema,
-    prompt,
+    prompt: jsonPrompt,
     system,
   });
 
-  return result.object;
+  console.log("[AI] Raw response:", result.text);
+
+  // Extract JSON from response (handle potential markdown code blocks)
+  const jsonText = extractJson(result.text);
+  console.log("[AI] Extracted JSON:", jsonText);
+
+  // Parse and validate with zod
+  try {
+    const parsed = JSON.parse(jsonText);
+    console.log("[AI] Parsed JSON:", parsed);
+
+    // Normalize string values to lowercase for enum matching
+    const normalized = normalizeForSchema(parsed);
+    console.log("[AI] Normalized JSON:", normalized);
+
+    // Try to parse
+    const result2 = schema.safeParse(normalized);
+    if (result2.success) {
+      return result2.data;
+    }
+
+    // If validation failed due to enum, try to coerce values
+    console.log("[AI] Initial validation failed, attempting enum coercion...");
+    const coerced = coerceEnumValues(normalized, schema);
+    console.log("[AI] Coerced JSON:", coerced);
+
+    const result3 = schema.safeParse(coerced);
+    if (result3.success) {
+      return result3.data;
+    }
+
+    // If still failed, log and throw
+    console.error("[AI] Zod validation failed:", result3.error.issues);
+    throw result3.error;
+  } catch (parseError) {
+    console.error("[AI] JSON parse error:", parseError);
+    console.error("[AI] Raw text was:", result.text);
+    throw parseError;
+  }
+}
+
+/**
+ * Try to coerce invalid enum values to valid ones based on similarity
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function coerceEnumValues(obj: any, schema: any): unknown {
+  if (obj === null || obj === undefined) return obj;
+
+  // Get the schema shape if it's an object
+  const shape = schema.shape || schema._def?.shape?.();
+
+  if (Array.isArray(obj)) {
+    const elementSchema = schema.element || schema._def?.type;
+    return obj.map((item) => coerceEnumValues(item, elementSchema));
+  }
+
+  if (typeof obj === "object" && shape) {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const fieldSchema = shape[key];
+      if (fieldSchema) {
+        result[key] = coerceEnumValues(value, fieldSchema);
+      } else {
+        result[key] = value;
+      }
+    }
+    return result;
+  }
+
+  // Check if this field is an enum and try to match
+  const enumValues = schema._def?.values;
+  if (enumValues && typeof obj === "string") {
+    // Exact match
+    if (enumValues.includes(obj)) {
+      return obj;
+    }
+
+    // Try to find a close match using simple heuristics
+    const lowerObj = obj.toLowerCase();
+
+    // Common mappings for sentiment/mood
+    const moodMappings: Record<string, string> = {
+      positive: "happy",
+      good: "happy",
+      great: "happy",
+      excellent: "happy",
+      negative: "sad",
+      bad: "sad",
+      unhappy: "sad",
+      okay: "neutral",
+      fine: "neutral",
+      normal: "neutral",
+    };
+
+    if (moodMappings[lowerObj] && enumValues.includes(moodMappings[lowerObj])) {
+      console.log(`[AI] Coerced enum value "${obj}" to "${moodMappings[lowerObj]}"`);
+      return moodMappings[lowerObj];
+    }
+
+    // Return first enum value as fallback
+    console.log(`[AI] Could not match enum value "${obj}", using first value: "${enumValues[0]}"`);
+    return enumValues[0];
+  }
+
+  return obj;
+}
+
+/**
+ * Recursively normalize object values - lowercase strings for enum matching
+ */
+function normalizeForSchema(obj: unknown): unknown {
+  if (obj === null || obj === undefined) return obj;
+
+  if (Array.isArray(obj)) {
+    return obj.map(normalizeForSchema);
+  }
+
+  if (typeof obj === "object") {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      // Lowercase the key and normalize the value
+      const normalizedKey = key.toLowerCase();
+      result[normalizedKey] = normalizeForSchema(value);
+    }
+    return result;
+  }
+
+  // Lowercase string values (for enum matching)
+  if (typeof obj === "string") {
+    return obj.toLowerCase();
+  }
+
+  return obj;
+}
+
+/**
+ * Extract JSON from text that might contain markdown code blocks
+ */
+function extractJson(text: string): string {
+  // Try to extract from markdown code block
+  const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+  if (codeBlockMatch) {
+    return codeBlockMatch[1].trim();
+  }
+
+  // Try to find JSON object or array directly
+  const jsonMatch = text.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
+  if (jsonMatch) {
+    return jsonMatch[1].trim();
+  }
+
+  // Return as-is and hope for the best
+  return text.trim();
+}
+
+/**
+ * Convert zod schema to a simple JSON description for the prompt
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function zodToJsonDescription(schema: any): unknown {
+  // Handle the schemas we use in the app
+  if (schema._def?.typeName === "ZodObject" || schema.shape) {
+    const shape = schema.shape || schema._def?.shape?.();
+    if (shape) {
+      const result: Record<string, unknown> = {};
+      for (const [key, value] of Object.entries(shape)) {
+        result[key] = zodToJsonDescription(value);
+      }
+      return result;
+    }
+  }
+
+  if (schema._def?.typeName === "ZodArray" || schema.element) {
+    const element = schema.element || schema._def?.type;
+    if (element) {
+      return [zodToJsonDescription(element)];
+    }
+  }
+
+  if (schema._def?.typeName === "ZodEnum" || schema._def?.values) {
+    const values = schema._def?.values || schema.options;
+    if (values) {
+      return `one of: ${values.join(", ")}`;
+    }
+  }
+
+  if (schema._def?.typeName === "ZodString") {
+    return "string";
+  }
+
+  if (schema._def?.typeName === "ZodNumber") {
+    return "number";
+  }
+
+  if (schema._def?.typeName === "ZodBoolean") {
+    return "boolean";
+  }
+
+  if (schema._def?.typeName === "ZodOptional") {
+    const inner = schema._def?.innerType || schema.unwrap?.();
+    if (inner) {
+      return `optional: ${zodToJsonDescription(inner)}`;
+    }
+  }
+
+  return "any";
 }
 
 // Generate text response

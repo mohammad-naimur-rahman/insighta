@@ -49,6 +49,10 @@ export async function extractClaims({
       }
     } catch (error) {
       console.error(`Error extracting claims from chunk ${i}:`, error);
+      // Log the full error details for debugging
+      if (error && typeof error === "object" && "responseBody" in error) {
+        console.error("API Response Body:", (error as { responseBody: string }).responseBody);
+      }
       // Continue with next chunk even if one fails
     }
 

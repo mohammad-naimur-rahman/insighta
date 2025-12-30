@@ -11,6 +11,20 @@ async function connectDB() {
     throw new Error("Please define the MONGODB_URI environment variable");
   }
 
+  // Check if already connected
+  if (mongoose.connection.readyState === 1) {
+    return mongoose;
+  }
+
+  // Check if connecting
+  if (mongoose.connection.readyState === 2) {
+    // Wait for connection to complete
+    await new Promise<void>((resolve) => {
+      mongoose.connection.once("connected", resolve);
+    });
+    return mongoose;
+  }
+
   console.log("[DB] Connecting to MongoDB...");
   await mongoose.connect(MONGODB_URI);
   console.log("[DB] Connected to MongoDB successfully");
