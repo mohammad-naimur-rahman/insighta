@@ -135,10 +135,16 @@ function coerceEnumValues(obj: any, schema: any): unknown {
     }
 
     // Try to find a close match using simple heuristics
-    const lowerObj = obj.toLowerCase();
+    const lowerObj = obj.toLowerCase().replace(/[\s-]/g, "_");
 
-    // Common mappings for sentiment/mood
-    const moodMappings: Record<string, string> = {
+    // Check if normalized version matches (e.g., "core insight" -> "core_insight")
+    if (enumValues.includes(lowerObj)) {
+      return lowerObj;
+    }
+
+    // Common mappings for various enum types
+    const enumMappings: Record<string, string> = {
+      // Mood/sentiment mappings
       positive: "happy",
       good: "happy",
       great: "happy",
@@ -149,11 +155,30 @@ function coerceEnumValues(obj: any, schema: any): unknown {
       okay: "neutral",
       fine: "neutral",
       normal: "neutral",
+      // Claim type mappings
+      core: "core_insight",
+      coreinsight: "core_insight",
+      supporting: "supporting_insight",
+      supportinginsight: "supporting_insight",
+      duplicate: "redundant",
+      repeated: "redundant",
+      generic: "filler",
+      obvious: "filler",
+      lowvalue: "filler",
+      low_value: "filler",
+      // Claim extraction type mappings
+      principles: "principle",
+      rules: "rule",
+      recommendations: "recommendation",
+      constraints: "constraint",
+      causals: "causal",
+      causalinsight: "causal",
     };
 
-    if (moodMappings[lowerObj] && enumValues.includes(moodMappings[lowerObj])) {
-      console.log(`[AI] Coerced enum value "${obj}" to "${moodMappings[lowerObj]}"`);
-      return moodMappings[lowerObj];
+    const mappedValue = enumMappings[lowerObj.replace(/_/g, "")];
+    if (mappedValue && enumValues.includes(mappedValue)) {
+      console.log(`[AI] Coerced enum value "${obj}" to "${mappedValue}"`);
+      return mappedValue;
     }
 
     // Return first enum value as fallback
@@ -165,7 +190,19 @@ function coerceEnumValues(obj: any, schema: any): unknown {
 }
 
 /**
- * Recursively normalize object values - lowercase strings for enum matching
+ * Convert camelCase or PascalCase to snake_case
+ */
+function toSnakeCase(str: string): string {
+  return str
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .replace(/([A-Z])([A-Z][a-z])/g, "$1_$2")
+    .toLowerCase();
+}
+
+/**
+ * Recursively normalize object keys and string values for schema matching
+ * - Converts camelCase keys to snake_case (e.g., ideaTitle -> idea_title)
+ * - Lowercases string values for enum matching
  */
 function normalizeForSchema(obj: unknown): unknown {
   if (obj === null || obj === undefined) return obj;
@@ -177,14 +214,15 @@ function normalizeForSchema(obj: unknown): unknown {
   if (typeof obj === "object") {
     const result: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(obj)) {
-      // Lowercase the key and normalize the value
-      const normalizedKey = key.toLowerCase();
+      // Convert camelCase to snake_case and lowercase
+      const normalizedKey = toSnakeCase(key);
       result[normalizedKey] = normalizeForSchema(value);
     }
     return result;
   }
 
   // Lowercase string values (for enum matching)
+  // But preserve underscores in enum values like "core_insight"
   if (typeof obj === "string") {
     return obj.toLowerCase();
   }
