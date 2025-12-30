@@ -25,8 +25,9 @@ export type ClaimType = "principle" | "rule" | "recommendation" | "constraint" |
 // User type
 export interface IUser {
   _id: Types.ObjectId;
-  googleId: string;
+  googleId?: string;
   email: string;
+  password?: string;
   name: string;
   avatar?: string;
   createdAt: Date;
@@ -42,6 +43,8 @@ export interface IBook {
   originalFilename: string;
   totalPages?: number;
   totalChunks?: number;
+  rawText?: string;
+  originalWordCount?: number;
   status: BookStatus;
   currentStep?: string;
   progress?: number;

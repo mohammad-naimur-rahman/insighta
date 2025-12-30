@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { Book } from "@/models";
+import { Book, Chunk, Claim, Idea, FinalOutput } from "@/models";
 import { getCurrentUser } from "@/lib/auth";
 
 export async function GET(
@@ -74,7 +74,13 @@ export async function DELETE(
       );
     }
 
-    // TODO: Also delete related Chunks, Claims, Ideas, FinalOutput
+    // Delete all related data
+    await Promise.all([
+      Chunk.deleteMany({ bookId: id }),
+      Claim.deleteMany({ bookId: id }),
+      Idea.deleteMany({ bookId: id }),
+      FinalOutput.deleteMany({ bookId: id }),
+    ]);
 
     return NextResponse.json({
       success: true,

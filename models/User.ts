@@ -1,12 +1,18 @@
 import mongoose, { Schema, Model } from "mongoose";
+import bcrypt from "bcryptjs";
 import type { IUser } from "@/types";
 
-const UserSchema = new Schema<IUser>(
+interface IUserMethods {
+  comparePassword(password: string): Promise<boolean>;
+}
+
+type UserModel = Model<IUser, object, IUserMethods>;
+
+const UserSchema = new Schema<IUser, UserModel, IUserMethods>(
   {
     googleId: {
       type: String,
-      required: true,
-      unique: true,
+      sparse: true, // Allow null but unique when present
       index: true,
     },
     email: {
@@ -15,6 +21,10 @@ const UserSchema = new Schema<IUser>(
       unique: true,
       lowercase: true,
       trim: true,
+    },
+    password: {
+      type: String,
+      // Required only for email auth, not for Google auth
     },
     name: {
       type: String,
@@ -30,7 +40,26 @@ const UserSchema = new Schema<IUser>(
   }
 );
 
-const User: Model<IUser> =
-  mongoose.models.User || mongoose.model<IUser>("User", UserSchema);
+// Hash password before saving
+UserSchema.pre("save", async function (next) {
+  if (!this.isModified("password") || !this.password) {
+    return next();
+  }
+
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+  next();
+});
+
+// Compare password method
+UserSchema.methods.comparePassword = async function (
+  password: string
+): Promise<boolean> {
+  if (!this.password) return false;
+  return bcrypt.compare(password, this.password);
+};
+
+const User: UserModel =
+  mongoose.models.User || mongoose.model<IUser, UserModel>("User", UserSchema);
 
 export default User;

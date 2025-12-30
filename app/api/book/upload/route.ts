@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { Book } from "@/models";
+import { Book, Chunk } from "@/models";
 import { getCurrentUser } from "@/lib/auth";
+import { parsePDF, countWords } from "@/lib/pdf-parser";
+import { chunkText } from "@/lib/chunker";
 
 export async function POST(request: NextRequest) {
   try {
@@ -48,32 +50,63 @@ export async function POST(request: NextRequest) {
     if (file.size > maxSize) {
       return NextResponse.json(
         { success: false, error: "File size must be less than 50MB" },
-        { status: 400 }
+        { status: 500 }
       );
     }
 
     await connectDB();
 
+    // Read file as buffer
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+
+    // Parse PDF and extract text
+    let parsedPDF;
+    try {
+      parsedPDF = await parsePDF(fileBuffer);
+    } catch (err) {
+      console.error("PDF parsing error:", err);
+      return NextResponse.json(
+        { success: false, error: "Failed to parse PDF. Make sure it's a valid PDF file." },
+        { status: 400 }
+      );
+    }
+
+    // Check if we extracted any text
+    if (!parsedPDF.text || parsedPDF.text.trim().length < 100) {
+      return NextResponse.json(
+        { success: false, error: "Could not extract text from PDF. The file may be scanned or image-based." },
+        { status: 400 }
+      );
+    }
+
+    // Create chunks from the extracted text
+    const chunks = chunkText(parsedPDF.text);
+    const wordCount = countWords(parsedPDF.text);
+
     // Create book record
     const book = await Book.create({
       userId: user.userId,
       title: title.trim(),
-      author: author?.trim() || undefined,
+      author: author?.trim() || parsedPDF.metadata.author || undefined,
       originalFilename: file.name,
+      totalPages: parsedPDF.numPages,
+      totalChunks: chunks.length,
+      rawText: parsedPDF.text,
+      originalWordCount: wordCount,
       status: "uploaded",
     });
 
-    // Store the file content in the book record or a separate storage
-    // For now, we'll process inline. In production, you'd want to use
-    // a file storage service like S3 or Vercel Blob.
+    // Save chunks to database
+    if (chunks.length > 0) {
+      const chunkDocs = chunks.map((chunk) => ({
+        bookId: book._id,
+        order: chunk.order,
+        text: chunk.text,
+        tokenCount: chunk.tokenCount,
+      }));
 
-    // Read file as array buffer for later processing
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
-
-    // Store file buffer temporarily (in production, use proper storage)
-    // For this implementation, we'll process immediately when user triggers processing
-
-    // TODO: In Phase 5, we'll implement proper file storage and processing
+      await Chunk.insertMany(chunkDocs);
+    }
 
     return NextResponse.json({
       success: true,
@@ -82,6 +115,9 @@ export async function POST(request: NextRequest) {
         title: book.title,
         author: book.author,
         status: book.status,
+        totalPages: book.totalPages,
+        totalChunks: book.totalChunks,
+        originalWordCount: book.originalWordCount,
         createdAt: book.createdAt,
       },
     });

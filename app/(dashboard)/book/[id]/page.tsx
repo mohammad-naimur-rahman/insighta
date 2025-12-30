@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/card";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
+import { DeleteBookDialog } from "@/components/DeleteBookDialog";
 import type { BookStatus } from "@/types";
 import {
   IconLoader,
@@ -190,11 +191,14 @@ export default function BookDetailPage() {
       </Button>
 
       {/* Book header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-bold">{book.title}</h1>
-        {book.author && (
-          <p className="text-muted-foreground">by {book.author}</p>
-        )}
+      <div className="flex items-start justify-between mb-8">
+        <div>
+          <h1 className="text-2xl font-bold">{book.title}</h1>
+          {book.author && (
+            <p className="text-muted-foreground">by {book.author}</p>
+          )}
+        </div>
+        <DeleteBookDialog bookId={bookId} bookTitle={book.title} />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
