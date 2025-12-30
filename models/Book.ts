@@ -4,15 +4,9 @@ import type { IBook, BookStatus } from "@/types";
 const bookStatuses: BookStatus[] = [
   "uploaded",
   "extracting",
-  "chunking",
-  "extracting_claims",
-  "filtering_claims",
-  "selecting_examples",
-  "clustering_ideas",
-  "rewriting_principles",
-  "generating_deltas",
-  "reconstructing",
-  "quality_check",
+  "detecting_chapters",
+  "compressing_chapters",
+  "assembling",
   "completed",
   "failed",
 ];
@@ -41,7 +35,7 @@ const BookSchema = new Schema<IBook>(
     totalPages: {
       type: Number,
     },
-    totalChunks: {
+    totalChapters: {
       type: Number,
     },
     originalWordCount: {

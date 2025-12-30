@@ -3,12 +3,9 @@ import { connectDB } from "@/lib/db";
 import { Book } from "@/models";
 import { getCurrentUser } from "@/lib/auth";
 import {
-  extractClaims,
-  filterClaims,
-  getFilteredClaims,
-  clusterIdeas,
-  reconstructBook,
-} from "@/lib/pipeline";
+  compressChapters,
+  assembleBook,
+} from "@/lib/pipeline/compress-chapters";
 
 export async function POST(
   request: NextRequest,
@@ -56,7 +53,7 @@ export async function POST(
     });
 
     // Update status to start processing
-    book.status = "extracting_claims";
+    book.status = "compressing_chapters";
     book.progress = 0;
     book.error = undefined;
     await book.save();
@@ -80,62 +77,29 @@ export async function POST(
 
 /**
  * Process book in background
- * This runs the full AI pipeline
+ * This runs the chapter-based compression pipeline
  */
 async function processBookInBackground(bookId: string): Promise<void> {
   try {
     await connectDB();
 
-    // Step 1: Extract claims (20% progress)
-    await updateBookStatus(bookId, "extracting_claims", 5);
-    await extractClaims({
+    // Step 1: Compress chapters (70% progress)
+    await updateBookStatus(bookId, "compressing_chapters", 5);
+    await compressChapters({
       bookId,
-      onProgress: async (current, total) => {
-        const progress = 5 + Math.round((current / total) * 15);
-        await updateBookProgress(bookId, progress);
-      },
-    });
-
-    // Step 2: Filter claims (40% progress)
-    await updateBookStatus(bookId, "filtering_claims", 20);
-    await filterClaims({
-      bookId,
-      onProgress: async (current, total) => {
-        const progress = 20 + Math.round((current / total) * 20);
-        await updateBookProgress(bookId, progress);
-      },
-    });
-
-    // Step 3: Get filtered claims for clustering
-    const filteredClaims = await getFilteredClaims(bookId);
-
-    if (filteredClaims.length === 0) {
-      throw new Error(
-        "No valuable claims found in this book. The content may be too generic or already well-known."
-      );
-    }
-
-    // Step 4: Cluster ideas (70% progress)
-    await updateBookStatus(bookId, "clustering_ideas", 40);
-    await clusterIdeas({
-      bookId,
-      filteredClaims,
       onProgress: async (step, current, total) => {
-        const progress = 40 + Math.round((current / total) * 30);
+        const progress = 5 + Math.round((current / total) * 65);
         await updateBookProgress(bookId, progress);
       },
     });
 
-    // Step 5: Reconstruct book (100% progress)
-    await updateBookStatus(bookId, "reconstructing", 70);
-    await reconstructBook({
+    // Step 2: Assemble final book (100% progress)
+    await updateBookStatus(bookId, "assembling", 75);
+    await assembleBook({
       bookId,
-      onProgress: async (step) => {
-        if (step === "Generating final output") {
-          await updateBookProgress(bookId, 85);
-        } else if (step === "Saving output") {
-          await updateBookProgress(bookId, 95);
-        }
+      onProgress: async (step, current, total) => {
+        const progress = 75 + Math.round((current / total) * 20);
+        await updateBookProgress(bookId, progress);
       },
     });
 

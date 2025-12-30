@@ -32,15 +32,9 @@ const statusConfig: Record<
 > = {
   uploaded: { label: "Uploaded", variant: "secondary" },
   extracting: { label: "Extracting text", variant: "default" },
-  chunking: { label: "Chunking", variant: "default" },
-  extracting_claims: { label: "Extracting claims", variant: "default" },
-  filtering_claims: { label: "Filtering claims", variant: "default" },
-  selecting_examples: { label: "Selecting examples", variant: "default" },
-  clustering_ideas: { label: "Clustering ideas", variant: "default" },
-  rewriting_principles: { label: "Rewriting principles", variant: "default" },
-  generating_deltas: { label: "Generating deltas", variant: "default" },
-  reconstructing: { label: "Reconstructing", variant: "default" },
-  quality_check: { label: "Quality check", variant: "default" },
+  detecting_chapters: { label: "Detecting chapters", variant: "default" },
+  compressing_chapters: { label: "Compressing", variant: "default" },
+  assembling: { label: "Assembling", variant: "default" },
   completed: { label: "Completed", variant: "outline" },
   failed: { label: "Failed", variant: "destructive" },
 };

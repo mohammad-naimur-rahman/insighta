@@ -17,15 +17,9 @@ interface ProcessingStep {
 const processingSteps: ProcessingStep[] = [
   { id: "uploaded", label: "Book uploaded" },
   { id: "extracting", label: "Extracting text from PDF" },
-  { id: "chunking", label: "Splitting into chunks" },
-  { id: "extracting_claims", label: "Extracting claims" },
-  { id: "filtering_claims", label: "Filtering & scoring claims" },
-  { id: "selecting_examples", label: "Selecting examples" },
-  { id: "clustering_ideas", label: "Clustering ideas" },
-  { id: "rewriting_principles", label: "Rewriting principles" },
-  { id: "generating_deltas", label: "Generating behavior deltas" },
-  { id: "reconstructing", label: "Reconstructing book" },
-  { id: "quality_check", label: "Quality check" },
+  { id: "detecting_chapters", label: "Detecting chapters" },
+  { id: "compressing_chapters", label: "Compressing chapters" },
+  { id: "assembling", label: "Assembling final book" },
   { id: "completed", label: "Completed" },
 ];
 

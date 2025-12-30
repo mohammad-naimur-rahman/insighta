@@ -4,15 +4,9 @@ import { Types } from "mongoose";
 export type BookStatus =
   | "uploaded"
   | "extracting"
-  | "chunking"
-  | "extracting_claims"
-  | "filtering_claims"
-  | "selecting_examples"
-  | "clustering_ideas"
-  | "rewriting_principles"
-  | "generating_deltas"
-  | "reconstructing"
-  | "quality_check"
+  | "detecting_chapters"
+  | "compressing_chapters"
+  | "assembling"
   | "completed"
   | "failed";
 
@@ -42,12 +36,28 @@ export interface IBook {
   author?: string;
   originalFilename: string;
   totalPages?: number;
-  totalChunks?: number;
+  totalChapters?: number;
   originalWordCount?: number;
   status: BookStatus;
   currentStep?: string;
   progress?: number;
   error?: string;
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+// Chapter type
+export interface IChapter {
+  _id: Types.ObjectId;
+  bookId: Types.ObjectId;
+  order: number;
+  title: string;
+  level: number; // 1 = chapter, 2 = section, 3 = subsection
+  originalContent: string;
+  compressedContent?: string;
+  keyInsights?: string[];
+  originalTokenCount: number;
+  compressedTokenCount?: number;
   createdAt: Date;
   updatedAt: Date;
 }

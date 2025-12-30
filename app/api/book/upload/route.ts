@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { Book, Chunk } from "@/models";
+import { Book, Chapter } from "@/models";
 import { getCurrentUser } from "@/lib/auth";
 import { parsePDF, countWords } from "@/lib/pdf-parser";
-import { chunkText } from "@/lib/chunker";
+import { extractChapters } from "@/lib/chapter-extractor";
 
 export async function POST(request: NextRequest) {
   try {
@@ -79,32 +79,34 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create chunks from the extracted text
-    const chunks = chunkText(parsedPDF.text);
+    // Extract chapters from the text
+    const bookStructure = extractChapters(parsedPDF.text);
     const wordCount = countWords(parsedPDF.text);
 
-    // Create book record (text is stored in chunks, not in the book document)
+    // Create book record
     const book = await Book.create({
       userId: user.userId,
       title: title.trim(),
       author: author?.trim() || parsedPDF.metadata.author || undefined,
       originalFilename: file.name,
       totalPages: parsedPDF.numPages,
-      totalChunks: chunks.length,
+      totalChapters: bookStructure.chapters.length,
       originalWordCount: wordCount,
       status: "uploaded",
     });
 
-    // Save chunks to database
-    if (chunks.length > 0) {
-      const chunkDocs = chunks.map((chunk) => ({
+    // Save chapters to database
+    if (bookStructure.chapters.length > 0) {
+      const chapterDocs = bookStructure.chapters.map((chapter) => ({
         bookId: book._id,
-        order: chunk.order,
-        text: chunk.text,
-        tokenCount: chunk.tokenCount,
+        order: chapter.order,
+        title: chapter.title,
+        level: chapter.level,
+        originalContent: chapter.content,
+        originalTokenCount: chapter.tokenCount,
       }));
 
-      await Chunk.insertMany(chunkDocs);
+      await Chapter.insertMany(chapterDocs);
     }
 
     return NextResponse.json({
@@ -115,7 +117,7 @@ export async function POST(request: NextRequest) {
         author: book.author,
         status: book.status,
         totalPages: book.totalPages,
-        totalChunks: book.totalChunks,
+        totalChapters: book.totalChapters,
         originalWordCount: book.originalWordCount,
         createdAt: book.createdAt,
       },
