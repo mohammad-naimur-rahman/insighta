@@ -43,7 +43,6 @@ export interface IBook {
   originalFilename: string;
   totalPages?: number;
   totalChunks?: number;
-  rawText?: string;
   originalWordCount?: number;
   status: BookStatus;
   currentStep?: string;

@@ -44,9 +44,6 @@ const BookSchema = new Schema<IBook>(
     totalChunks: {
       type: Number,
     },
-    rawText: {
-      type: String,
-    },
     originalWordCount: {
       type: Number,
     },

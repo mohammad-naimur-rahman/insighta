@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
     const chunks = chunkText(parsedPDF.text);
     const wordCount = countWords(parsedPDF.text);
 
-    // Create book record
+    // Create book record (text is stored in chunks, not in the book document)
     const book = await Book.create({
       userId: user.userId,
       title: title.trim(),
@@ -91,7 +91,6 @@ export async function POST(request: NextRequest) {
       originalFilename: file.name,
       totalPages: parsedPDF.numPages,
       totalChunks: chunks.length,
-      rawText: parsedPDF.text,
       originalWordCount: wordCount,
       status: "uploaded",
     });
