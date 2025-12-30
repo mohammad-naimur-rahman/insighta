@@ -1,50 +1,22 @@
 import mongoose from "mongoose";
+import dns from "dns";
 
-interface MongooseCache {
-  conn: typeof mongoose | null;
-  promise: Promise<typeof mongoose> | null;
-}
+// Force Node.js to use Google DNS for resolution (fixes SRV lookup issues on Windows)
+dns.setServers(["8.8.8.8", "8.8.4.4"]);
 
-declare global {
-  // eslint-disable-next-line no-var
-  var mongoose: MongooseCache | undefined;
-}
+const MONGODB_URI = process.env.MONGODB_URI;
 
-const cached: MongooseCache = global.mongoose || { conn: null, promise: null };
-
-if (!global.mongoose) {
-  global.mongoose = cached;
-}
-
-export async function connectDB(): Promise<typeof mongoose> {
-  const MONGODB_URI = process.env.MONGODB_URI;
-
+async function connectDB() {
   if (!MONGODB_URI) {
     throw new Error("Please define the MONGODB_URI environment variable");
   }
 
-  if (cached.conn) {
-    return cached.conn;
-  }
+  console.log("[DB] Connecting to MongoDB...");
+  await mongoose.connect(MONGODB_URI);
+  console.log("[DB] Connected to MongoDB successfully");
 
-  if (!cached.promise) {
-    const opts = {
-      bufferCommands: false,
-    };
-
-    cached.promise = mongoose.connect(MONGODB_URI, opts).then((mongoose) => {
-      return mongoose;
-    });
-  }
-
-  try {
-    cached.conn = await cached.promise;
-  } catch (e) {
-    cached.promise = null;
-    throw e;
-  }
-
-  return cached.conn;
+  return mongoose;
 }
 
+export { connectDB };
 export default connectDB;
