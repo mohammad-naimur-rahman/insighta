@@ -123,3 +123,81 @@ Create a cohesive, readable book summary that:
 
 Output the complete markdown document.`;
 }
+
+/**
+ * Build a prompt to generate a running context summary from previous chapters
+ * This keeps the context small while maintaining narrative continuity
+ */
+export function buildContextSummaryPrompt(
+  bookTitle: string,
+  previousContext: string,
+  currentChapterTitle: string,
+  currentChapterInsights: string[]
+): string {
+  return `You are tracking the key narrative and concepts from "${bookTitle}".
+
+PREVIOUS CONTEXT (running summary so far):
+${previousContext || "This is the first chapter."}
+
+CURRENT CHAPTER: ${currentChapterTitle}
+KEY INSIGHTS FROM THIS CHAPTER:
+${currentChapterInsights.map((i, idx) => `${idx + 1}. ${i}`).join("\n")}
+
+YOUR TASK:
+Create an updated running summary (max 200 words) that:
+1. Integrates the new chapter's key insights with the existing context
+2. Maintains the narrative flow and how ideas build on each other
+3. Captures the most important concepts needed to understand future chapters
+4. Drops redundant or superseded information
+
+Output ONLY the updated context summary, nothing else.`;
+}
+
+/**
+ * Build a prompt for generating just the book overview
+ */
+export function buildOverviewPrompt(
+  bookTitle: string,
+  author: string | undefined,
+  chapterTitles: string[],
+  allInsights: string[]
+): string {
+  return `You are writing an overview for the condensed version of "${bookTitle}"${author ? ` by ${author}` : ""}.
+
+CHAPTER TITLES:
+${chapterTitles.map((t, i) => `${i + 1}. ${t}`).join("\n")}
+
+KEY INSIGHTS FROM THE BOOK:
+${allInsights.slice(0, 20).map((i, idx) => `- ${i}`).join("\n")}
+
+YOUR TASK:
+Write a brief overview (2-3 paragraphs, ~150-200 words) that:
+1. Captures what this book is about and who it's for
+2. Highlights the main themes and value proposition
+3. Sets up what the reader will learn
+4. Maintains the author's voice and tone
+
+Output ONLY the overview text, no headers or formatting.`;
+}
+
+/**
+ * Build a prompt for generating key takeaways from all chapter insights
+ */
+export function buildKeyTakeawaysPrompt(
+  bookTitle: string,
+  allInsights: string[]
+): string {
+  return `You are compiling the key takeaways from "${bookTitle}".
+
+ALL INSIGHTS FROM THE BOOK:
+${allInsights.map((i, idx) => `${idx + 1}. ${i}`).join("\n")}
+
+YOUR TASK:
+Select and refine the 7-10 most important takeaways that:
+1. Represent the core value of the book
+2. Are actionable or memorable
+3. Cover different aspects of the book (don't cluster on one topic)
+4. Are written as clear, standalone statements
+
+Output as a markdown bullet list, one takeaway per line starting with "- ".`;
+}

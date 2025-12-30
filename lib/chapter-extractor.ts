@@ -122,10 +122,77 @@ export function extractChapters(text: string): BookStructure {
     };
   }
 
+  // Split any chapters that are too large
+  const finalChapters: Chapter[] = [];
+  for (const chapter of chapters) {
+    if (chapter.tokenCount > MAX_CHAPTER_TOKENS) {
+      const splitChapters = splitLargeChapterInternal(chapter);
+      // Re-number the split chapters
+      for (const sc of splitChapters) {
+        finalChapters.push({
+          ...sc,
+          order: finalChapters.length,
+        });
+      }
+    } else {
+      finalChapters.push({
+        ...chapter,
+        order: finalChapters.length,
+      });
+    }
+  }
+
   return {
-    chapters,
+    chapters: finalChapters,
     hasDetectedStructure,
   };
+}
+
+/**
+ * Internal function to split a large chapter (used during extraction)
+ */
+function splitLargeChapterInternal(chapter: Chapter): Chapter[] {
+  const subChapters: Chapter[] = [];
+  const paragraphs = chapter.content.split(/\n{2,}/).filter(p => p.trim().length > 0);
+
+  let currentContent: string[] = [];
+  let currentTokens = 0;
+  let partNum = 1;
+
+  for (const paragraph of paragraphs) {
+    const tokens = estimateTokens(paragraph);
+
+    if (currentTokens + tokens > MAX_CHAPTER_TOKENS && currentContent.length > 0) {
+      const content = currentContent.join("\n\n").trim();
+      subChapters.push({
+        order: 0, // Will be reassigned
+        title: `${chapter.title} (Part ${partNum})`,
+        level: chapter.level,
+        content,
+        tokenCount: estimateTokens(content),
+      });
+      partNum++;
+      currentContent = [];
+      currentTokens = 0;
+    }
+
+    currentContent.push(paragraph);
+    currentTokens += tokens;
+  }
+
+  // Save last part
+  if (currentContent.length > 0) {
+    const content = currentContent.join("\n\n").trim();
+    subChapters.push({
+      order: 0, // Will be reassigned
+      title: partNum > 1 ? `${chapter.title} (Part ${partNum})` : chapter.title,
+      level: chapter.level,
+      content,
+      tokenCount: estimateTokens(content),
+    });
+  }
+
+  return subChapters;
 }
 
 /**

@@ -2,7 +2,8 @@ import { generateStructured, generateResponse } from "@/lib/ai";
 import {
   ChapterCompressionSchema,
   buildChapterCompressionPrompt,
-  buildBookAssemblyPrompt,
+  buildOverviewPrompt,
+  buildKeyTakeawaysPrompt,
 } from "@/lib/prompts/chapter-compression";
 import { Book, Chapter, FinalOutput } from "@/models";
 import { parallelMap } from "@/lib/parallel";
@@ -187,6 +188,7 @@ export async function compressChapters({
 
 /**
  * Assemble compressed chapters into final markdown output
+ * Uses incremental assembly to handle books of any size
  */
 export async function assembleBook({
   bookId,
@@ -207,25 +209,76 @@ export async function assembleBook({
     throw new Error("No compressed chapters found");
   }
 
-  console.log(`[Assemble] Assembling ${chapters.length} chapters`);
-  onProgress?.("Assembling book", 1, 2);
+  console.log(`[Assemble] Assembling ${chapters.length} chapters incrementally`);
 
-  // Build the final markdown document
-  const compressedChapters = chapters.map(ch => ({
-    title: ch.title,
-    content: ch.compressedContent || "",
-    insights: ch.keyInsights || [],
-  }));
+  // Collect all insights and chapter titles
+  const allInsights: string[] = [];
+  const chapterTitles: string[] = [];
 
-  // Generate overview and key takeaways using AI
-  const prompt = buildBookAssemblyPrompt(book.title, book.author, compressedChapters);
+  for (const chapter of chapters) {
+    chapterTitles.push(chapter.title);
+    if (chapter.keyInsights) {
+      allInsights.push(...chapter.keyInsights);
+    }
+  }
 
-  const markdown = await generateResponse(prompt, {
+  // Step 1: Generate Overview (small prompt with just titles and sample insights)
+  onProgress?.("Generating overview", 1, 3);
+  console.log(`[Assemble] Generating overview...`);
+
+  const overviewPrompt = buildOverviewPrompt(
+    book.title,
+    book.author,
+    chapterTitles,
+    allInsights
+  );
+
+  const overview = await generateResponse(overviewPrompt, {
     model: "reasoning",
-    system: "You are a book editor creating a cohesive, readable condensed version of a book. Maintain the author's voice and style throughout.",
+    system: "You are a book editor writing an engaging overview. Be concise but compelling.",
   });
 
-  onProgress?.("Assembling book", 2, 2);
+  // Step 2: Generate Key Takeaways (from all insights)
+  onProgress?.("Generating takeaways", 2, 3);
+  console.log(`[Assemble] Generating key takeaways from ${allInsights.length} insights...`);
+
+  const takeawaysPrompt = buildKeyTakeawaysPrompt(book.title, allInsights);
+
+  const takeaways = await generateResponse(takeawaysPrompt, {
+    model: "reasoning",
+    system: "You are selecting the most impactful insights from a book. Be selective and clear.",
+  });
+
+  // Step 3: Assemble the final markdown document
+  onProgress?.("Assembling document", 3, 3);
+
+  const markdownParts: string[] = [];
+
+  // Title and author
+  markdownParts.push(`# ${book.title}`);
+  if (book.author) {
+    markdownParts.push(`*By ${book.author}*`);
+  }
+  markdownParts.push("");
+
+  // Overview section
+  markdownParts.push("## Overview");
+  markdownParts.push(overview.trim());
+  markdownParts.push("");
+
+  // Each chapter with its compressed content
+  for (let i = 0; i < chapters.length; i++) {
+    const chapter = chapters[i];
+    markdownParts.push(`## Chapter ${i + 1}: ${chapter.title}`);
+    markdownParts.push(chapter.compressedContent || "");
+    markdownParts.push("");
+  }
+
+  // Key Takeaways section
+  markdownParts.push("## Key Takeaways");
+  markdownParts.push(takeaways.trim());
+
+  const markdown = markdownParts.join("\n");
 
   // Calculate word count
   const wordCount = markdown.split(/\s+/).length;
@@ -254,7 +307,7 @@ export async function assembleBook({
     },
   });
 
-  console.log(`[Assemble] Complete: ${wordCount} words`);
+  console.log(`[Assemble] Complete: ${wordCount} words, ${chapters.length} chapters`);
 
   return { wordCount, markdown };
 }
