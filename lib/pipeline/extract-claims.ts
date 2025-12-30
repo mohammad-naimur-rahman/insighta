@@ -4,11 +4,21 @@ import {
   buildClaimExtractionPrompt,
 } from "@/lib/prompts/claim-extraction";
 import { Chunk, Claim, Book } from "@/models";
+import { parallelMap } from "@/lib/parallel";
 import type { Types } from "mongoose";
+import type { IChunk } from "@/types";
+
+// Concurrency limit for API calls (adjust based on rate limits)
+const CONCURRENCY = 5;
 
 interface ExtractClaimsOptions {
   bookId: Types.ObjectId | string;
   onProgress?: (current: number, total: number) => void;
+}
+
+interface ChunkResult {
+  chunkId: Types.ObjectId;
+  claims: { claim: string; type: string }[];
 }
 
 export async function extractClaims({
@@ -22,48 +32,70 @@ export async function extractClaims({
     throw new Error("No chunks found for this book");
   }
 
-  let totalClaimsExtracted = 0;
+  console.log(`[Extract] Processing ${chunks.length} chunks with concurrency ${CONCURRENCY}`);
+  const startTime = Date.now();
 
-  // Process each chunk
-  for (let i = 0; i < chunks.length; i++) {
-    const chunk = chunks[i];
+  // Process chunks in parallel
+  const results = await parallelMap<IChunk, ChunkResult | null>(
+    chunks,
+    async (chunk, index) => {
+      try {
+        const prompt = buildClaimExtractionPrompt(chunk.text);
+        const result = await generateStructured(ClaimExtractionSchema, prompt, {
+          model: "extraction",
+        });
 
-    try {
-      // Build prompt and extract claims
-      const prompt = buildClaimExtractionPrompt(chunk.text);
-      const result = await generateStructured(ClaimExtractionSchema, prompt, {
-        model: "extraction",
-      });
+        if (result.claims && result.claims.length > 0) {
+          return {
+            chunkId: chunk._id,
+            claims: result.claims,
+          };
+        }
+        return null;
+      } catch (error) {
+        console.error(`[Extract] Error on chunk ${index}:`, error);
+        return null;
+      }
+    },
+    {
+      concurrency: CONCURRENCY,
+      onProgress,
+    }
+  );
 
-      // Save claims to database
-      if (result.claims && result.claims.length > 0) {
-        const claimDocs = result.claims.map((claim) => ({
+  // Collect all claims for bulk insert
+  const allClaimDocs: {
+    bookId: Types.ObjectId | string;
+    chunkId: Types.ObjectId;
+    text: string;
+    type: string;
+  }[] = [];
+
+  for (const result of results) {
+    if (result && !(result instanceof Error) && result.claims) {
+      for (const claim of result.claims) {
+        allClaimDocs.push({
           bookId,
-          chunkId: chunk._id,
+          chunkId: result.chunkId,
           text: claim.claim,
           type: claim.type,
-        }));
-
-        await Claim.insertMany(claimDocs);
-        totalClaimsExtracted += result.claims.length;
+        });
       }
-    } catch (error) {
-      console.error(`Error extracting claims from chunk ${i}:`, error);
-      // Log the full error details for debugging
-      if (error && typeof error === "object" && "responseBody" in error) {
-        console.error("API Response Body:", (error as { responseBody: string }).responseBody);
-      }
-      // Continue with next chunk even if one fails
     }
-
-    // Report progress
-    onProgress?.(i + 1, chunks.length);
   }
+
+  // Bulk insert all claims at once
+  if (allClaimDocs.length > 0) {
+    await Claim.insertMany(allClaimDocs);
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`[Extract] Completed: ${allClaimDocs.length} claims in ${elapsed}s`);
 
   // Update book with claim count
   await Book.findByIdAndUpdate(bookId, {
     $set: { currentStep: "Claims extracted" },
   });
 
-  return totalClaimsExtracted;
+  return allClaimDocs.length;
 }

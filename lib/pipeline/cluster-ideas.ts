@@ -1,17 +1,36 @@
-import { generateStructured, generateResponse } from "@/lib/ai";
+import { generateStructured } from "@/lib/ai";
 import {
   IdeaClusteringSchema,
   buildIdeaClusteringPrompt,
 } from "@/lib/prompts/idea-clustering";
-import { buildPrincipleRewritePrompt } from "@/lib/prompts/principle-rewrite";
-import { buildBehaviorDeltaPrompt } from "@/lib/prompts/behavior-delta";
+import {
+  IdeaExpansionSchema,
+  buildIdeaExpansionPrompt,
+} from "@/lib/prompts/idea-expansion";
 import { Idea, Book } from "@/models";
+import { parallelMap } from "@/lib/parallel";
 import type { Types } from "mongoose";
+
+// Concurrency for parallel idea expansion
+const CONCURRENCY = 5;
 
 interface ClusterIdeasOptions {
   bookId: Types.ObjectId | string;
   filteredClaims: string[];
   onProgress?: (step: string, current: number, total: number) => void;
+}
+
+interface ClusteredIdea {
+  idea_title: string;
+  merged_claims: string[];
+  summary: string;
+}
+
+interface ExpandedIdea {
+  idea: ClusteredIdea;
+  principle: string;
+  behaviorDelta: string;
+  order: number;
 }
 
 export async function clusterIdeas({
@@ -23,8 +42,11 @@ export async function clusterIdeas({
     throw new Error("No filtered claims to cluster");
   }
 
+  console.log(`[Cluster] Starting with ${filteredClaims.length} claims`);
+  const startTime = Date.now();
+
   // Step 1: Cluster claims into ideas
-  onProgress?.("Clustering claims", 1, 4);
+  onProgress?.("Clustering claims", 1, 3);
 
   const prompt = buildIdeaClusteringPrompt(filteredClaims);
   const clusterResult = await generateStructured(IdeaClusteringSchema, prompt, {
@@ -35,65 +57,66 @@ export async function clusterIdeas({
     throw new Error("No ideas generated from clustering");
   }
 
-  // Step 2: Generate principles for each idea
-  onProgress?.("Generating principles", 2, 4);
+  console.log(`[Cluster] Generated ${clusterResult.ideas.length} idea clusters`);
 
-  const ideasWithPrinciples = await Promise.all(
-    clusterResult.ideas.map(async (idea, index) => {
-      const principlePrompt = buildPrincipleRewritePrompt(
-        idea.idea_title,
-        idea.merged_claims
-      );
-      const principle = await generateResponse(principlePrompt, {
-        model: "reasoning",
-      });
+  // Step 2: Generate principles and behavior deltas in parallel (combined prompt)
+  onProgress?.("Expanding ideas", 2, 3);
 
-      return {
-        ...idea,
-        principle,
-        order: index,
-      };
-    })
+  const expandedIdeas = await parallelMap<ClusteredIdea, ExpandedIdea | null>(
+    clusterResult.ideas,
+    async (idea, index) => {
+      try {
+        const expansionPrompt = buildIdeaExpansionPrompt(
+          idea.idea_title,
+          idea.merged_claims
+        );
+        const expansion = await generateStructured(IdeaExpansionSchema, expansionPrompt, {
+          model: "reasoning",
+        });
+
+        return {
+          idea,
+          principle: expansion.principle,
+          behaviorDelta: expansion.behavior_delta,
+          order: index,
+        };
+      } catch (error) {
+        console.error(`[Cluster] Error expanding idea ${index}:`, error);
+        return null;
+      }
+    },
+    {
+      concurrency: CONCURRENCY,
+    }
   );
 
-  // Step 3: Generate behavior deltas
-  onProgress?.("Generating behavior deltas", 3, 4);
-
-  const ideasWithDeltas = await Promise.all(
-    ideasWithPrinciples.map(async (idea) => {
-      const deltaPrompt = buildBehaviorDeltaPrompt(
-        idea.idea_title,
-        idea.principle
-      );
-      const behaviorDelta = await generateResponse(deltaPrompt, {
-        model: "reasoning",
-      });
-
-      return {
-        ...idea,
-        behaviorDelta,
-      };
-    })
-  );
-
-  // Step 4: Save ideas to database
-  onProgress?.("Saving ideas", 4, 4);
+  // Step 3: Save ideas to database
+  onProgress?.("Saving ideas", 3, 3);
 
   // Delete any existing ideas for this book
   await Idea.deleteMany({ bookId });
 
-  // Create new ideas
-  const ideaDocs = ideasWithDeltas.map((idea) => ({
+  // Create new ideas from successful expansions
+  const successfulExpansions = expandedIdeas.filter(
+    (result): result is ExpandedIdea => result !== null && !(result instanceof Error)
+  );
+
+  const ideaDocs = successfulExpansions.map((result) => ({
     bookId,
-    title: idea.idea_title,
-    mergedClaims: idea.merged_claims,
-    principle: idea.principle,
-    behaviorDelta: idea.behaviorDelta,
-    examples: [], // Will be populated separately if needed
-    order: idea.order,
+    title: result.idea.idea_title,
+    mergedClaims: result.idea.merged_claims,
+    principle: result.principle,
+    behaviorDelta: result.behaviorDelta,
+    examples: [] as string[],
+    order: result.order,
   }));
 
-  await Idea.insertMany(ideaDocs);
+  if (ideaDocs.length > 0) {
+    await Idea.insertMany(ideaDocs);
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`[Cluster] Completed: ${ideaDocs.length} ideas in ${elapsed}s`);
 
   // Update book status
   await Book.findByIdAndUpdate(bookId, {

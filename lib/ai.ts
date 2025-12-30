@@ -57,20 +57,15 @@ ${JSON.stringify(schemaDesc, null, 2)}`;
     system,
   });
 
-  console.log("[AI] Raw response:", result.text);
-
   // Extract JSON from response (handle potential markdown code blocks)
   const jsonText = extractJson(result.text);
-  console.log("[AI] Extracted JSON:", jsonText);
 
   // Parse and validate with zod
   try {
     const parsed = JSON.parse(jsonText);
-    console.log("[AI] Parsed JSON:", parsed);
 
     // Normalize string values to lowercase for enum matching
     const normalized = normalizeForSchema(parsed);
-    console.log("[AI] Normalized JSON:", normalized);
 
     // Try to parse
     const result2 = schema.safeParse(normalized);
@@ -79,9 +74,7 @@ ${JSON.stringify(schemaDesc, null, 2)}`;
     }
 
     // If validation failed due to enum, try to coerce values
-    console.log("[AI] Initial validation failed, attempting enum coercion...");
     const coerced = coerceEnumValues(normalized, schema);
-    console.log("[AI] Coerced JSON:", coerced);
 
     const result3 = schema.safeParse(coerced);
     if (result3.success) {
@@ -99,11 +92,19 @@ ${JSON.stringify(schemaDesc, null, 2)}`;
 }
 
 /**
- * Try to coerce invalid enum values to valid ones based on similarity
+ * Try to coerce values to match schema types (enums, numbers, etc.)
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function coerceEnumValues(obj: any, schema: any): unknown {
   if (obj === null || obj === undefined) return obj;
+
+  // Handle number coercion (string "0.5" -> number 0.5)
+  if (schema._def?.typeName === "ZodNumber" && typeof obj === "string") {
+    const num = parseFloat(obj);
+    if (!isNaN(num)) {
+      return num;
+    }
+  }
 
   // Get the schema shape if it's an object
   const shape = schema.shape || schema._def?.shape?.();
@@ -177,12 +178,10 @@ function coerceEnumValues(obj: any, schema: any): unknown {
 
     const mappedValue = enumMappings[lowerObj.replace(/_/g, "")];
     if (mappedValue && enumValues.includes(mappedValue)) {
-      console.log(`[AI] Coerced enum value "${obj}" to "${mappedValue}"`);
       return mappedValue;
     }
 
     // Return first enum value as fallback
-    console.log(`[AI] Could not match enum value "${obj}", using first value: "${enumValues[0]}"`);
     return enumValues[0];
   }
 
