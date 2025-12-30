@@ -19,8 +19,8 @@ export interface BookStructure {
 const CHAPTER_PATTERNS = [
   // "Chapter 1: Title" or "Chapter 1 - Title" or "Chapter One"
   /^(?:chapter|ch\.?)\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)[\s:.\-–—]*(.*)$/i,
-  // "Part 1: Title" or "Part One"
-  /^(?:part)\s*(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s:.\-–—]*(.*)$/i,
+  // "Part I: Title" or "Part 1: Title" or "Part One" (Roman numerals)
+  /^(?:part)\s*(?:[IVX]+|\d+|one|two|three|four|five|six|seven|eight|nine|ten)[\s:.\-–—]*(.*)$/i,
   // "1. Title" or "1 - Title" at start of line (numbered chapters)
   /^(\d{1,2})[\s.\-–—]+([A-Z][^.!?]*?)$/,
   // "Section 1: Title"
@@ -28,10 +28,16 @@ const CHAPTER_PATTERNS = [
 ];
 
 const SECTION_PATTERNS = [
-  // ALL CAPS titles (common in many books)
-  /^([A-Z][A-Z\s]{3,50})$/,
-  // Title Case lines that are short (likely headings)
-  /^([A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,6})$/,
+  // ALL CAPS titles (2+ words, common section headers like "BUILDING WEALTH")
+  /^([A-Z]{2,}(?:\s+[A-Z]{2,})+)$/,
+  // Single ALL CAPS word that's likely a section (at least 5 chars)
+  /^([A-Z]{5,})$/,
+];
+
+// Subsection patterns - more specific to avoid false positives
+const SUBSECTION_PATTERNS = [
+  // Title Case lines that look like subsection headings (2-7 words, no punctuation at end)
+  /^([A-Z][a-z]+(?:\s+(?:[A-Z][a-z]+|[a-z]+|to|of|the|a|an|in|on|for|with|by|is|are))+)$/,
 ];
 
 /**
@@ -58,29 +64,39 @@ export function extractChapters(text: string): BookStructure {
     // Check for chapter heading
     const chapterMatch = matchChapterHeading(line);
     if (chapterMatch) {
-      // Save previous chapter
-      if (currentChapter && currentChapter.content.length > 0) {
-        const content = currentChapter.content.join("\n").trim();
-        if (content.length > 100) { // Only save if substantial content
-          chapters.push({
-            order: chapters.length,
-            title: currentChapter.title,
-            level: currentChapter.level,
-            content,
-            tokenCount: estimateTokens(content),
-          });
+      // Only create new chapters for level 1 (Parts) and level 2 (Major sections)
+      // Level 3 (subsections) stay within the current chapter as content
+      if (chapterMatch.level <= 2) {
+        // Save previous chapter
+        if (currentChapter && currentChapter.content.length > 0) {
+          const content = currentChapter.content.join("\n").trim();
+          if (content.length > 100) { // Only save if substantial content
+            chapters.push({
+              order: chapters.length,
+              title: currentChapter.title,
+              level: currentChapter.level,
+              content,
+              tokenCount: estimateTokens(content),
+            });
+          }
+        }
+
+        // Start new chapter
+        currentChapter = {
+          title: chapterMatch.title,
+          level: chapterMatch.level,
+          content: [],
+          startLine: i,
+        };
+        detectedChapters++;
+        continue;
+      } else {
+        // Level 3 subsections: add as a markdown header within content
+        if (currentChapter) {
+          currentChapter.content.push(`\n### ${chapterMatch.title}\n`);
+          continue;
         }
       }
-
-      // Start new chapter
-      currentChapter = {
-        title: chapterMatch.title,
-        level: chapterMatch.level,
-        content: [],
-        startLine: i,
-      };
-      detectedChapters++;
-      continue;
     }
 
     // Add line to current chapter
@@ -220,14 +236,27 @@ function matchChapterHeading(line: string): { title: string; level: number } | n
     }
   }
 
-  // Check section patterns (level 2)
+  // Check section patterns (level 2) - ALL CAPS headers
   for (const pattern of SECTION_PATTERNS) {
     const match = line.match(pattern);
     if (match) {
       const title = match[1].trim();
       // Make sure it's not a regular sentence fragment
-      if (title.length >= 3 && title.length <= 60) {
+      if (title.length >= 5 && title.length <= 60) {
         return { title, level: 2 };
+      }
+    }
+  }
+
+  // Check subsection patterns (level 3) - Title Case headers
+  for (const pattern of SUBSECTION_PATTERNS) {
+    const match = line.match(pattern);
+    if (match) {
+      const title = match[1].trim();
+      // Subsections should be reasonably short (2-8 words)
+      const wordCount = title.split(/\s+/).length;
+      if (wordCount >= 2 && wordCount <= 8 && title.length <= 60) {
+        return { title, level: 3 };
       }
     }
   }
