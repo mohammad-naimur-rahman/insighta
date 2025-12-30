@@ -42,6 +42,8 @@ export interface IBook {
   currentStep?: string;
   progress?: number;
   error?: string;
+  processingStartedAt?: Date;
+  processingCompletedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }

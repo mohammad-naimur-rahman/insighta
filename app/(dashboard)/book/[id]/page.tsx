@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { ProcessingStatus } from "@/components/ProcessingStatus";
+import { ProcessingTimer } from "@/components/ProcessingTimer";
 import { MarkdownRenderer } from "@/components/MarkdownRenderer";
 import { DeleteBookDialog } from "@/components/DeleteBookDialog";
 import type { BookStatus } from "@/types";
@@ -30,6 +31,8 @@ interface BookData {
   status: BookStatus;
   progress?: number;
   error?: string;
+  processingStartedAt?: string;
+  processingCompletedAt?: string;
   createdAt: string;
 }
 
@@ -324,7 +327,14 @@ export default function BookDetailPage() {
         <div className="lg:col-span-1">
           <Card>
             <CardHeader>
-              <CardTitle className="text-lg">Processing Status</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Processing Status</CardTitle>
+                <ProcessingTimer
+                  startedAt={book.processingStartedAt}
+                  completedAt={book.processingCompletedAt}
+                  isProcessing={isProcessingStatus}
+                />
+              </div>
             </CardHeader>
             <CardContent>
               <ProcessingStatus

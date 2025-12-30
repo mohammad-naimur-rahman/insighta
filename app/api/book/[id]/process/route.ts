@@ -56,6 +56,8 @@ export async function POST(
     book.status = "compressing_chapters";
     book.progress = 0;
     book.error = undefined;
+    book.processingStartedAt = new Date();
+    book.processingCompletedAt = undefined;
     await book.save();
 
     return NextResponse.json({
@@ -104,7 +106,12 @@ async function processBookInBackground(bookId: string): Promise<void> {
     });
 
     // Done!
-    await updateBookStatus(bookId, "completed", 100);
+    await Book.findByIdAndUpdate(bookId, {
+      status: "completed",
+      progress: 100,
+      currentStep: "completed",
+      processingCompletedAt: new Date(),
+    });
   } catch (error) {
     console.error("Pipeline error:", error);
     const errorMessage =
@@ -112,6 +119,7 @@ async function processBookInBackground(bookId: string): Promise<void> {
     await Book.findByIdAndUpdate(bookId, {
       status: "failed",
       error: errorMessage,
+      processingCompletedAt: new Date(),
     });
   }
 }

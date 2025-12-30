@@ -59,6 +59,12 @@ const BookSchema = new Schema<IBook>(
     error: {
       type: String,
     },
+    processingStartedAt: {
+      type: Date,
+    },
+    processingCompletedAt: {
+      type: Date,
+    },
   },
   {
     timestamps: true,
@@ -67,6 +73,11 @@ const BookSchema = new Schema<IBook>(
 
 // Compound index for user's books sorted by creation date
 BookSchema.index({ userId: 1, createdAt: -1 });
+
+// Delete cached model in development to pick up schema changes
+if (process.env.NODE_ENV !== "production" && mongoose.models.Book) {
+  delete mongoose.models.Book;
+}
 
 const Book: Model<IBook> =
   mongoose.models.Book || mongoose.model<IBook>("Book", BookSchema);
