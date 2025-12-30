@@ -52,8 +52,13 @@ Compress this chapter to approximately 30-40% of its original length while:
    - Keep paragraph structure similar to original
    - Maintain the chapter's narrative arc
    - Don't convert prose into bullet points
-   - Don't add headers that weren't there
    ${isFirstChapter ? "- Include the chapter's opening hook" : ""}
+
+5. NORMALIZE SECTION HEADERS:
+   - Convert informal markers like "chunk 1:", "part a:", "section 1:", "step 1:" into clean markdown headers
+   - Use ### for sub-sections (e.g., "chunk 1: syntax basics" becomes "### Syntax Basics")
+   - Remove numbering prefixes from section titles
+   - Keep the descriptive part of the title, capitalize properly
 
 OUTPUT FORMAT:
 Write the compressed chapter as natural prose, exactly as it would appear in a shorter version of the book.
