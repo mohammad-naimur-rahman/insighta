@@ -7,8 +7,12 @@ import {
 import { Book, Chapter, FinalOutput } from "@/models";
 import { parallelMap } from "@/lib/parallel";
 import { estimateTokens } from "@/lib/pdf-parser";
+import { splitLargeChapter, type Chapter as ChapterType } from "@/lib/chapter-extractor";
 import type { Types } from "mongoose";
 import type { IChapter } from "@/types";
+
+// Maximum tokens per chunk for API calls
+const MAX_TOKENS_PER_CALL = 6000;
 
 // Concurrency for parallel chapter compression
 const CONCURRENCY = 3;
@@ -55,6 +59,66 @@ export async function compressChapters({
       try {
         onProgress?.("Compressing chapters", index + 1, chapters.length);
 
+        // Check if chapter is too large and needs to be split
+        if (chapter.originalTokenCount > MAX_TOKENS_PER_CALL) {
+          console.log(`[Compress] Chapter ${index} has ${chapter.originalTokenCount} tokens, splitting...`);
+
+          // Split into smaller parts
+          const chapterData: ChapterType = {
+            order: chapter.order,
+            title: chapter.title,
+            level: chapter.level,
+            content: chapter.originalContent,
+            tokenCount: chapter.originalTokenCount,
+          };
+
+          const parts = splitLargeChapter(chapterData);
+          console.log(`[Compress] Split into ${parts.length} parts`);
+
+          // Compress each part
+          const partResults: { compressed: string; insights: string[] }[] = [];
+
+          for (let i = 0; i < parts.length; i++) {
+            const part = parts[i];
+            const prompt = buildChapterCompressionPrompt(
+              part.title,
+              part.content,
+              book.title,
+              index === 0 && i === 0
+            );
+
+            const result = await generateStructured(ChapterCompressionSchema, prompt, {
+              model: "reasoning",
+            });
+
+            partResults.push({
+              compressed: result.compressed_content,
+              insights: result.key_insights,
+            });
+          }
+
+          // Combine results
+          const combinedCompressed = partResults.map(r => r.compressed).join("\n\n");
+          const combinedInsights = [...new Set(partResults.flatMap(r => r.insights))].slice(0, 5);
+          const compressedTokens = estimateTokens(combinedCompressed);
+
+          // Update chapter in database
+          await Chapter.findByIdAndUpdate(chapter._id, {
+            $set: {
+              compressedContent: combinedCompressed,
+              keyInsights: combinedInsights,
+              compressedTokenCount: compressedTokens,
+            },
+          });
+
+          return {
+            compressed: combinedCompressed,
+            insights: combinedInsights,
+            tokens: compressedTokens,
+          };
+        }
+
+        // Normal case - chapter fits in one call
         const prompt = buildChapterCompressionPrompt(
           chapter.title,
           chapter.originalContent,

@@ -168,6 +168,9 @@ function matchChapterHeading(line: string): { title: string; level: number } | n
   return null;
 }
 
+// Maximum tokens per chapter to avoid API limits
+const MAX_CHAPTER_TOKENS = 6000;
+
 /**
  * Create artificial chapters from content when no structure is detected
  * Splits by natural topic boundaries or size
@@ -216,6 +219,57 @@ function createChaptersFromContent(text: string): Chapter[] {
   }
 
   return chapters;
+}
+
+/**
+ * Split a large chapter into smaller sub-chapters
+ */
+export function splitLargeChapter(chapter: Chapter): Chapter[] {
+  if (chapter.tokenCount <= MAX_CHAPTER_TOKENS) {
+    return [chapter];
+  }
+
+  const subChapters: Chapter[] = [];
+  const paragraphs = chapter.content.split(/\n{2,}/).filter(p => p.trim().length > 0);
+
+  let currentContent: string[] = [];
+  let currentTokens = 0;
+  let partNum = 1;
+
+  for (const paragraph of paragraphs) {
+    const tokens = estimateTokens(paragraph);
+
+    if (currentTokens + tokens > MAX_CHAPTER_TOKENS && currentContent.length > 0) {
+      const content = currentContent.join("\n\n").trim();
+      subChapters.push({
+        order: chapter.order,
+        title: `${chapter.title} (Part ${partNum})`,
+        level: chapter.level,
+        content,
+        tokenCount: estimateTokens(content),
+      });
+      partNum++;
+      currentContent = [];
+      currentTokens = 0;
+    }
+
+    currentContent.push(paragraph);
+    currentTokens += tokens;
+  }
+
+  // Save last part
+  if (currentContent.length > 0) {
+    const content = currentContent.join("\n\n").trim();
+    subChapters.push({
+      order: chapter.order,
+      title: partNum > 1 ? `${chapter.title} (Part ${partNum})` : chapter.title,
+      level: chapter.level,
+      content,
+      tokenCount: estimateTokens(content),
+    });
+  }
+
+  return subChapters;
 }
 
 /**
