@@ -11,6 +11,8 @@ const bookStatuses: BookStatus[] = [
   "failed",
 ];
 
+const extractionMethods = ["toc", "regex", "artificial"] as const;
+
 const BookSchema = new Schema<IBook>(
   {
     userId: {
@@ -64,6 +66,26 @@ const BookSchema = new Schema<IBook>(
     },
     processingCompletedAt: {
       type: Date,
+    },
+    // New fields for TOC and content analysis
+    extractionMethod: {
+      type: String,
+      enum: extractionMethods,
+    },
+    contentDensityScore: {
+      type: Number,
+      min: 1,
+      max: 10,
+    },
+    recommendedCompression: {
+      type: Number,
+      min: 0.1,
+      max: 0.7,
+    },
+    recommendedContextSize: {
+      type: Number,
+      min: 50,
+      max: 500,
     },
   },
   {

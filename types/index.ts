@@ -13,6 +13,12 @@ export type BookStatus =
 // Claim labels from the filtering step
 export type ClaimLabel = "core_insight" | "supporting_insight" | "redundant" | "filler";
 
+// Chapter extraction method
+export type ExtractionMethod = "toc" | "regex" | "artificial";
+
+// Content density level
+export type DensityLevel = "fluffy" | "medium" | "dense";
+
 // Claim types from extraction
 export type ClaimType = "principle" | "rule" | "recommendation" | "constraint" | "causal";
 
@@ -44,6 +50,11 @@ export interface IBook {
   error?: string;
   processingStartedAt?: Date;
   processingCompletedAt?: Date;
+  // New fields for TOC and content analysis
+  extractionMethod?: ExtractionMethod;
+  contentDensityScore?: number;
+  recommendedCompression?: number;
+  recommendedContextSize?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -60,6 +71,9 @@ export interface IChapter {
   keyInsights?: string[];
   originalTokenCount: number;
   compressedTokenCount?: number;
+  // New fields for context-aware compression
+  previousContext?: string;
+  chapterSummary?: string;
   createdAt: Date;
   updatedAt: Date;
 }

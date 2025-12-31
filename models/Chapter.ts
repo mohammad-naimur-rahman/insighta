@@ -41,6 +41,13 @@ const ChapterSchema = new Schema<IChapter>(
     compressedTokenCount: {
       type: Number,
     },
+    // New fields for context-aware compression
+    previousContext: {
+      type: String,
+    },
+    chapterSummary: {
+      type: String,
+    },
   },
   {
     timestamps: true,

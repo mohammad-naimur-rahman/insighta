@@ -10,6 +10,16 @@ export interface ParsedPDF {
   };
 }
 
+export interface ParsedPDFWithPages {
+  pages: string[];
+  numPages: number;
+  metadata: {
+    title?: string;
+    author?: string;
+    creator?: string;
+  };
+}
+
 /**
  * Parse a PDF file and extract its text content
  */
@@ -90,4 +100,53 @@ export function estimateTokens(text: string): number {
  */
 export function countWords(text: string): number {
   return text.split(/\s+/).filter((word) => word.length > 0).length;
+}
+
+/**
+ * Parse a PDF file and extract text per page
+ * Used for TOC detection from first N pages
+ */
+export async function parsePDFWithPages(buffer: Buffer): Promise<ParsedPDFWithPages> {
+  const uint8Array = new Uint8Array(buffer);
+
+  // Get document proxy for metadata
+  const pdf = await getDocumentProxy(new Uint8Array(uint8Array));
+
+  // Extract text with mergePages: false to get array of page texts
+  const result = await extractText(new Uint8Array(uint8Array), {
+    mergePages: false,
+  });
+
+  // Get metadata
+  const metadata = await pdf.getMetadata().catch(() => null);
+  const info = metadata?.info as Record<string, unknown> | undefined;
+
+  // Clean each page's text
+  const pages = Array.isArray(result.text)
+    ? result.text.map((pageText) => cleanText(pageText))
+    : [cleanText(result.text)];
+
+  return {
+    pages,
+    numPages: result.totalPages,
+    metadata: {
+      title: info?.Title as string | undefined,
+      author: info?.Author as string | undefined,
+      creator: info?.Creator as string | undefined,
+    },
+  };
+}
+
+/**
+ * Get first N pages combined as text for TOC detection
+ */
+export function getFirstPages(pages: string[], n: number = 15): string {
+  return pages.slice(0, n).join("\n\n--- PAGE BREAK ---\n\n");
+}
+
+/**
+ * Merge all pages into a single text string
+ */
+export function mergePages(pages: string[]): string {
+  return pages.join("\n\n");
 }

@@ -1,7 +1,10 @@
 import { generateStructured, generateResponse } from "@/lib/ai";
 import {
   ChapterCompressionSchema,
+  ChapterCompressionWithSummarySchema,
   buildChapterCompressionPrompt,
+  buildChapterCompressionPromptWithContext,
+  buildRunningContextPrompt,
   buildOverviewPrompt,
   buildKeyTakeawaysPrompt,
 } from "@/lib/prompts/chapter-compression";
@@ -10,7 +13,7 @@ import { parallelMap } from "@/lib/parallel";
 import { estimateTokens } from "@/lib/pdf-parser";
 import { splitLargeChapter, type Chapter as ChapterType } from "@/lib/chapter-extractor";
 import type { Types } from "mongoose";
-import type { IChapter } from "@/types";
+import type { IChapter, IBook } from "@/types";
 
 // Maximum tokens per chunk for API calls
 const MAX_TOKENS_PER_CALL = 6000;

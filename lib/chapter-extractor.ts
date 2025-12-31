@@ -1,16 +1,20 @@
 import { estimateTokens } from "./pdf-parser";
+import type { TOCExtractionResult, TOCEntry } from "./toc-extractor";
 
 export interface Chapter {
   order: number;
   title: string;
-  level: number; // 1 = chapter, 2 = section, 3 = subsection
+  level: number; // 1 = chapter/part, 2 = section, 3 = subsection
   content: string;
   tokenCount: number;
 }
 
+export type ExtractionMethod = "toc" | "regex" | "artificial";
+
 export interface BookStructure {
   chapters: Chapter[];
   hasDetectedStructure: boolean;
+  extractionMethod: ExtractionMethod;
 }
 
 /**
@@ -135,6 +139,7 @@ export function extractChapters(text: string): BookStructure {
     return {
       chapters: createChaptersFromContent(text),
       hasDetectedStructure: false,
+      extractionMethod: "artificial",
     };
   }
 
@@ -161,6 +166,7 @@ export function extractChapters(text: string): BookStructure {
   return {
     chapters: finalChapters,
     hasDetectedStructure,
+    extractionMethod: "regex",
   };
 }
 
@@ -386,4 +392,228 @@ export function getBookStats(structure: BookStructure): {
     avgTokensPerChapter: Math.round(totalTokens / structure.chapters.length) || 0,
     hasStructure: structure.hasDetectedStructure,
   };
+}
+
+// ============================================================================
+// TOC-GUIDED CHAPTER EXTRACTION
+// ============================================================================
+
+/**
+ * Normalize a string for fuzzy matching
+ */
+function normalizeForMatching(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\w\s]/g, "") // Remove punctuation
+    .replace(/\s+/g, " ") // Normalize whitespace
+    .trim();
+}
+
+/**
+ * Fuzzy match a TOC title against text content
+ * Returns the position and confidence score
+ */
+function fuzzyMatchTitle(
+  text: string,
+  tocTitle: string,
+  startFrom: number = 0
+): { position: number; confidence: number; matchedText: string } | null {
+  const normalizedToc = normalizeForMatching(tocTitle);
+  const searchText = text.slice(startFrom);
+  const searchTextLower = searchText.toLowerCase();
+
+  // Strategy 1: Exact match (after normalization)
+  const exactPattern = new RegExp(
+    normalizedToc.split(" ").join("\\s+"),
+    "i"
+  );
+  const exactMatch = searchText.match(exactPattern);
+  if (exactMatch && exactMatch.index !== undefined) {
+    return {
+      position: startFrom + exactMatch.index,
+      confidence: 1.0,
+      matchedText: exactMatch[0],
+    };
+  }
+
+  // Strategy 2: Match with common chapter prefixes
+  const prefixPatterns = [
+    `chapter\\s*\\d+[:\\s\\-–—]*${normalizedToc.split(" ").join("\\s+")}`,
+    `part\\s*[ivx\\d]+[:\\s\\-–—]*${normalizedToc.split(" ").join("\\s+")}`,
+    `\\d+\\.?\\s*${normalizedToc.split(" ").join("\\s+")}`,
+  ];
+
+  for (const pattern of prefixPatterns) {
+    try {
+      const regex = new RegExp(pattern, "i");
+      const match = searchText.match(regex);
+      if (match && match.index !== undefined) {
+        return {
+          position: startFrom + match.index,
+          confidence: 0.9,
+          matchedText: match[0],
+        };
+      }
+    } catch {
+      // Invalid regex, skip
+    }
+  }
+
+  // Strategy 3: Word overlap matching (for partial matches)
+  const tocWords = normalizedToc.split(" ").filter((w) => w.length > 3);
+  if (tocWords.length >= 2) {
+    // Look for lines containing most of the key words
+    const lines = searchText.split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const lineLower = line.toLowerCase();
+      const lineNormalized = normalizeForMatching(line);
+
+      // Count matching words
+      const matchedWords = tocWords.filter((word) => lineLower.includes(word));
+      const matchRatio = matchedWords.length / tocWords.length;
+
+      // If most words match and line looks like a heading
+      if (matchRatio >= 0.7 && line.length < 150) {
+        const lineStart = searchText.indexOf(line);
+        if (lineStart !== -1) {
+          return {
+            position: startFrom + lineStart,
+            confidence: 0.6 + matchRatio * 0.2,
+            matchedText: line,
+          };
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Extract chapters using TOC entries as guide
+ * Falls back to regex extraction if TOC matching fails
+ */
+export function extractChaptersWithTOC(
+  text: string,
+  toc: TOCExtractionResult
+): BookStructure {
+  if (!toc.has_toc || toc.entries.length === 0) {
+    console.log("[TOC] No TOC entries, falling back to regex extraction");
+    return extractChapters(text);
+  }
+
+  const chapters: Chapter[] = [];
+  let lastPosition = 0;
+  let failedMatches = 0;
+
+  // Filter to level 1 and 2 entries (parts and chapters, not subsections)
+  const chapterEntries = toc.entries.filter((e) => e.level <= 2);
+
+  console.log(`[TOC] Attempting to match ${chapterEntries.length} chapter entries`);
+
+  for (let i = 0; i < chapterEntries.length; i++) {
+    const entry = chapterEntries[i];
+    const nextEntry = chapterEntries[i + 1];
+
+    // Find this chapter's start position
+    const match = fuzzyMatchTitle(text, entry.normalized_title, lastPosition);
+
+    if (!match) {
+      console.warn(`[TOC] Could not find chapter: "${entry.title}" (normalized: "${entry.normalized_title}")`);
+      failedMatches++;
+      continue;
+    }
+
+    // Find next chapter's start (or end of text)
+    let endPosition = text.length;
+    if (nextEntry) {
+      const nextMatch = fuzzyMatchTitle(
+        text,
+        nextEntry.normalized_title,
+        match.position + 100
+      );
+      if (nextMatch) {
+        endPosition = nextMatch.position;
+      }
+    }
+
+    // Extract content between chapter boundaries
+    const content = text.slice(match.position, endPosition).trim();
+
+    if (content.length > 100) {
+      // Clean up the title - remove chapter prefixes if present
+      let cleanTitle = entry.title
+        .replace(/^(?:chapter|ch\.?)\s*\d+[:\s\-–—]*/i, "")
+        .replace(/^(?:part)\s*[ivx\d]+[:\s\-–—]*/i, "")
+        .replace(/^\d+\.?\s*/, "")
+        .trim();
+
+      // If cleaning left it empty, use original
+      if (!cleanTitle) cleanTitle = entry.title;
+
+      chapters.push({
+        order: chapters.length,
+        title: cleanTitle,
+        level: entry.level,
+        content,
+        tokenCount: estimateTokens(content),
+      });
+
+      console.log(
+        `[TOC] Found chapter ${chapters.length}: "${cleanTitle}" (${estimateTokens(content)} tokens, confidence: ${match.confidence.toFixed(2)})`
+      );
+    }
+
+    lastPosition = match.position + 100;
+  }
+
+  // Check if TOC matching was successful
+  const matchRate = (chapterEntries.length - failedMatches) / chapterEntries.length;
+
+  if (chapters.length < 3 || matchRate < 0.5) {
+    console.log(
+      `[TOC] Poor match rate (${(matchRate * 100).toFixed(0)}%), falling back to regex extraction`
+    );
+    return extractChapters(text);
+  }
+
+  console.log(
+    `[TOC] Successfully extracted ${chapters.length} chapters (${(matchRate * 100).toFixed(0)}% match rate)`
+  );
+
+  // Split any chapters that are too large
+  const finalChapters = splitLargeChaptersArray(chapters);
+
+  return {
+    chapters: finalChapters,
+    hasDetectedStructure: true,
+    extractionMethod: "toc",
+  };
+}
+
+/**
+ * Split an array of chapters, handling oversized ones
+ */
+function splitLargeChaptersArray(chapters: Chapter[]): Chapter[] {
+  const result: Chapter[] = [];
+
+  for (const chapter of chapters) {
+    if (chapter.tokenCount > MAX_CHAPTER_TOKENS) {
+      const split = splitLargeChapter(chapter);
+      for (const sc of split) {
+        result.push({
+          ...sc,
+          order: result.length,
+        });
+      }
+    } else {
+      result.push({
+        ...chapter,
+        order: result.length,
+      });
+    }
+  }
+
+  return result;
 }
