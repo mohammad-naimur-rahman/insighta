@@ -2,6 +2,33 @@ import { z } from "zod";
 import { generateStructured } from "@/lib/ai";
 
 /**
+ * Helper to parse a value that might be a number or a non-numeric string
+ * Returns undefined for non-numeric strings like "not specified"
+ */
+function parseOptionalNumber(val: unknown): number | undefined {
+  if (val === undefined || val === null) return undefined;
+  if (typeof val === "number") return isNaN(val) ? undefined : val;
+  if (typeof val === "string") {
+    const num = parseInt(val, 10);
+    return isNaN(num) ? undefined : num;
+  }
+  return undefined;
+}
+
+/**
+ * Helper to parse has_toc which AI sometimes returns as confidence level
+ */
+function parseHasToc(val: unknown): boolean {
+  if (typeof val === "boolean") return val;
+  if (typeof val === "string") {
+    // AI sometimes returns confidence level instead of boolean
+    if (val === "true" || val === "high" || val === "medium") return true;
+    if (val === "false" || val === "low" || val === "none") return false;
+  }
+  return false;
+}
+
+/**
  * Schema for a single TOC entry
  */
 export const TOCEntrySchema = z.object({
@@ -9,9 +36,14 @@ export const TOCEntrySchema = z.object({
   normalized_title: z
     .string()
     .describe("Cleaned version without chapter numbers, page numbers, or dots for matching"),
-  page_number: z.coerce.number().optional().describe("Page number if visible in TOC"),
+  page_number: z
+    .unknown()
+    .transform(parseOptionalNumber)
+    .optional()
+    .describe("Page number if visible in TOC (numeric only, omit if not a number)"),
   level: z.coerce
     .number()
+    .default(2)
     .describe("Hierarchy level: 1=Part/Book, 2=Chapter, 3=Section/Subsection"),
 });
 
@@ -19,10 +51,21 @@ export const TOCEntrySchema = z.object({
  * Schema for TOC extraction result
  */
 export const TOCExtractionSchema = z.object({
-  has_toc: z.boolean().describe("Whether a clear Table of Contents was found"),
+  has_toc: z
+    .unknown()
+    .transform(parseHasToc)
+    .describe("Whether a clear Table of Contents was found (true/false)"),
   entries: z.array(TOCEntrySchema).describe("TOC entries found, in order"),
-  toc_start_page: z.coerce.number().optional().describe("Approximate page where TOC starts"),
-  toc_end_page: z.coerce.number().optional().describe("Approximate page where TOC ends"),
+  toc_start_page: z
+    .unknown()
+    .transform(parseOptionalNumber)
+    .optional()
+    .describe("Approximate page number where TOC starts (numeric only)"),
+  toc_end_page: z
+    .unknown()
+    .transform(parseOptionalNumber)
+    .optional()
+    .describe("Approximate page number where TOC ends (numeric only)"),
   confidence: z
     .enum(["high", "medium", "low"])
     .describe("Confidence in TOC detection accuracy"),

@@ -73,7 +73,7 @@ export function BookCard({
         <CardHeader className="pb-2">
           <div className="flex items-start justify-between gap-2">
             <div className="flex-1 min-w-0">
-              <CardTitle className="text-lg truncate">{title}</CardTitle>
+              <CardTitle className="text-lg line-clamp-2">{title}</CardTitle>
               {author && (
                 <CardDescription className="truncate">{author}</CardDescription>
               )}
