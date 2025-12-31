@@ -85,6 +85,11 @@ async function processBookInBackground(bookId: string): Promise<void> {
   try {
     await connectDB();
 
+    // Helper to update currentStep in database
+    const updateStepDetail = async (stepDetail: string) => {
+      await Book.findByIdAndUpdate(bookId, { currentStep: stepDetail });
+    };
+
     // Step 1: Compress chapters sequentially with context (70% progress)
     // Uses adaptive compression based on content density analysis
     await updateBookStatus(bookId, "compressing_chapters", 5);
@@ -94,6 +99,7 @@ async function processBookInBackground(bookId: string): Promise<void> {
         const progress = 5 + Math.round((current / total) * 65);
         await updateBookProgress(bookId, progress);
       },
+      onStepUpdate: updateStepDetail,
     });
 
     // Step 2: Assemble final book (100% progress)
@@ -104,13 +110,14 @@ async function processBookInBackground(bookId: string): Promise<void> {
         const progress = 75 + Math.round((current / total) * 20);
         await updateBookProgress(bookId, progress);
       },
+      onStepUpdate: updateStepDetail,
     });
 
     // Done!
     await Book.findByIdAndUpdate(bookId, {
       status: "completed",
       progress: 100,
-      currentStep: "completed",
+      currentStep: "Processing complete",
       processingCompletedAt: new Date(),
     });
   } catch (error) {
@@ -120,6 +127,7 @@ async function processBookInBackground(bookId: string): Promise<void> {
     await Book.findByIdAndUpdate(bookId, {
       status: "failed",
       error: errorMessage,
+      currentStep: "Failed",
       processingCompletedAt: new Date(),
     });
   }

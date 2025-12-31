@@ -26,18 +26,24 @@ const processingSteps: ProcessingStep[] = [
 interface ProcessingStatusProps {
   currentStatus: BookStatus;
   progress?: number;
+  currentStep?: string;
   error?: string;
 }
 
 export function ProcessingStatus({
   currentStatus,
   progress,
+  currentStep,
   error,
 }: ProcessingStatusProps) {
   const currentIndex = processingSteps.findIndex(
     (step) => step.id === currentStatus
   );
   const isFailed = currentStatus === "failed";
+  const isProcessing =
+    currentStatus !== "uploaded" &&
+    currentStatus !== "completed" &&
+    currentStatus !== "failed";
 
   return (
     <div className="space-y-4">
@@ -57,7 +63,7 @@ export function ProcessingStatus({
               )}
             >
               {/* Status icon */}
-              <div className="flex-shrink-0">
+              <div className="shrink-0">
                 {isCompleted || (isCurrent && currentStatus === "completed") ? (
                   <IconCheck className="h-5 w-5 text-green-500" />
                 ) : isCurrent ? (
@@ -86,9 +92,17 @@ export function ProcessingStatus({
         })}
       </div>
 
+      {/* Current step detail */}
+      {isProcessing && currentStep && (
+        <div className="px-3 py-2 bg-muted/50 rounded-md border border-border/50">
+          <p className="text-xs text-muted-foreground mb-1">Current task</p>
+          <p className="text-sm font-medium truncate">{currentStep}</p>
+        </div>
+      )}
+
       {/* Progress bar */}
       {progress !== undefined && !isFailed && currentStatus !== "completed" && (
-        <div className="pt-4">
+        <div className="pt-2">
           <div className="flex justify-between text-sm text-muted-foreground mb-2">
             <span>Overall progress</span>
             <span>{Math.round(progress)}%</span>

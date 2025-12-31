@@ -24,6 +24,7 @@ const CONCURRENCY = 3;
 interface CompressChaptersOptions {
   bookId: Types.ObjectId | string;
   onProgress?: (step: string, current: number, total: number) => void;
+  onStepUpdate?: (stepDetail: string) => Promise<void>;
 }
 
 interface CompressResult {
@@ -196,6 +197,7 @@ export async function compressChapters({
 export async function compressChaptersWithContext({
   bookId,
   onProgress,
+  onStepUpdate,
 }: CompressChaptersOptions): Promise<CompressResult> {
   const book = await Book.findById(bookId);
   if (!book) {
@@ -225,6 +227,12 @@ export async function compressChaptersWithContext({
   for (let i = 0; i < chapters.length; i++) {
     const chapter = chapters[i];
     onProgress?.("Compressing chapters", i + 1, chapters.length);
+
+    // Update detailed step info
+    const shortTitle = chapter.title.length > 30
+      ? chapter.title.substring(0, 30) + "..."
+      : chapter.title;
+    await onStepUpdate?.(`Compressing chapter ${i + 1}/${chapters.length}: "${shortTitle}"`);
 
     try {
       let result: { compressed_content: string; key_insights: string[]; chapter_summary: string };
@@ -384,6 +392,7 @@ async function compressLargeChapterWithContext(
 export async function assembleBook({
   bookId,
   onProgress,
+  onStepUpdate,
 }: CompressChaptersOptions): Promise<{ wordCount: number; markdown: string }> {
   const book = await Book.findById(bookId);
   if (!book) {
@@ -415,6 +424,7 @@ export async function assembleBook({
 
   // Step 1: Generate Overview (small prompt with just titles and sample insights)
   onProgress?.("Generating overview", 1, 3);
+  await onStepUpdate?.("Generating book overview...");
   console.log(`[Assemble] Generating overview...`);
 
   const overviewPrompt = buildOverviewPrompt(
@@ -431,6 +441,7 @@ export async function assembleBook({
 
   // Step 2: Generate Key Takeaways (from all insights)
   onProgress?.("Generating takeaways", 2, 3);
+  await onStepUpdate?.("Generating key takeaways...");
   console.log(`[Assemble] Generating key takeaways from ${allInsights.length} insights...`);
 
   const takeawaysPrompt = buildKeyTakeawaysPrompt(book.title, allInsights);
@@ -442,6 +453,7 @@ export async function assembleBook({
 
   // Step 3: Assemble the final markdown document
   onProgress?.("Assembling document", 3, 3);
+  await onStepUpdate?.("Assembling final document...");
 
   const markdownParts: string[] = [];
 

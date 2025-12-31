@@ -30,6 +30,7 @@ interface BookData {
   author?: string;
   status: BookStatus;
   progress?: number;
+  currentStep?: string;
   error?: string;
   processingStartedAt?: string;
   processingCompletedAt?: string;
@@ -340,6 +341,7 @@ export default function BookDetailPage() {
               <ProcessingStatus
                 currentStatus={book.status}
                 progress={book.progress}
+                currentStep={book.currentStep}
                 error={book.error}
               />
             </CardContent>
