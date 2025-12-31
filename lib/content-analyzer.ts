@@ -5,7 +5,7 @@ import { generateStructured } from "@/lib/ai";
  * Schema for content density analysis result
  */
 export const ContentDensitySchema = z.object({
-  density_score: z
+  density_score: z.coerce
     .number()
     .min(1)
     .max(10)
@@ -13,12 +13,12 @@ export const ContentDensitySchema = z.object({
   characteristics: z
     .array(z.string())
     .describe("Key characteristics of the writing style"),
-  recommended_compression: z
+  recommended_compression: z.coerce
     .number()
     .min(0.15)
     .max(0.6)
     .describe("Recommended compression ratio (0.2 = keep 20% of original)"),
-  recommended_context_size: z
+  recommended_context_size: z.coerce
     .number()
     .min(100)
     .max(350)

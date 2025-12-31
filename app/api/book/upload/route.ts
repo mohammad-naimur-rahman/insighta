@@ -2,8 +2,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
 import { Book, Chapter } from "@/models";
 import { getCurrentUser } from "@/lib/auth";
-import { parsePDF, countWords } from "@/lib/pdf-parser";
-import { extractChapters } from "@/lib/chapter-extractor";
+import {
+  parsePDFWithPages,
+  getFirstPages,
+  mergePages,
+  countWords,
+} from "@/lib/pdf-parser";
+import { extractChapters, extractChaptersWithTOC } from "@/lib/chapter-extractor";
+import { extractTOC, isTOCReliable } from "@/lib/toc-extractor";
+import {
+  analyzeContentDensity,
+  createAnalysisSample,
+} from "@/lib/content-analyzer";
 
 export async function POST(request: NextRequest) {
   try {
@@ -59,10 +69,10 @@ export async function POST(request: NextRequest) {
     // Read file as buffer
     const fileBuffer = Buffer.from(await file.arrayBuffer());
 
-    // Parse PDF and extract text
+    // Parse PDF with per-page extraction for TOC detection
     let parsedPDF;
     try {
-      parsedPDF = await parsePDF(fileBuffer);
+      parsedPDF = await parsePDFWithPages(fileBuffer);
     } catch (err) {
       console.error("PDF parsing error:", err);
       return NextResponse.json(
@@ -71,19 +81,48 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Merge all pages into full text
+    const fullText = mergePages(parsedPDF.pages);
+
     // Check if we extracted any text
-    if (!parsedPDF.text || parsedPDF.text.trim().length < 100) {
+    if (!fullText || fullText.trim().length < 100) {
       return NextResponse.json(
         { success: false, error: "Could not extract text from PDF. The file may be scanned or image-based." },
         { status: 400 }
       );
     }
 
-    // Extract chapters from the text
-    const bookStructure = extractChapters(parsedPDF.text);
-    const wordCount = countWords(parsedPDF.text);
+    // Step 1: Extract TOC from first pages
+    console.log("[Upload] Extracting TOC from first 15 pages...");
+    const firstPagesText = getFirstPages(parsedPDF.pages, 15);
+    const tocResult = await extractTOC(firstPagesText);
 
-    // Create book record
+    // Step 2: Extract chapters using TOC or fallback to regex
+    let bookStructure;
+    if (isTOCReliable(tocResult)) {
+      console.log(`[Upload] TOC detected with ${tocResult.entries.length} entries, using TOC-guided extraction`);
+      bookStructure = extractChaptersWithTOC(fullText, tocResult);
+    } else {
+      console.log("[Upload] No reliable TOC found, using regex-based extraction");
+      bookStructure = extractChapters(fullText);
+    }
+
+    console.log(`[Upload] Extracted ${bookStructure.chapters.length} chapters using ${bookStructure.extractionMethod} method`);
+
+    // Step 3: Analyze content density for adaptive compression
+    console.log("[Upload] Analyzing content density...");
+    const sampleText = createAnalysisSample(
+      bookStructure.chapters.map((c) => ({ content: c.content }))
+    );
+    const densityResult = await analyzeContentDensity(sampleText);
+
+    console.log(
+      `[Upload] Content density: score=${densityResult.density_score}, compression=${(densityResult.recommended_compression * 100).toFixed(0)}%`
+    );
+
+    const wordCount = countWords(fullText);
+
+    // Create book record with new fields
     const book = await Book.create({
       userId: user.userId,
       title: title.trim(),
@@ -93,6 +132,11 @@ export async function POST(request: NextRequest) {
       totalChapters: bookStructure.chapters.length,
       originalWordCount: wordCount,
       status: "uploaded",
+      // New fields
+      extractionMethod: bookStructure.extractionMethod,
+      contentDensityScore: densityResult.density_score,
+      recommendedCompression: densityResult.recommended_compression,
+      recommendedContextSize: densityResult.recommended_context_size,
     });
 
     // Save chapters to database
@@ -119,6 +163,9 @@ export async function POST(request: NextRequest) {
         totalPages: book.totalPages,
         totalChapters: book.totalChapters,
         originalWordCount: book.originalWordCount,
+        extractionMethod: book.extractionMethod,
+        contentDensityScore: book.contentDensityScore,
+        recommendedCompression: book.recommendedCompression,
         createdAt: book.createdAt,
       },
     });

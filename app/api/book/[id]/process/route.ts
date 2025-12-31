@@ -3,7 +3,7 @@ import { connectDB } from "@/lib/db";
 import { Book } from "@/models";
 import { getCurrentUser } from "@/lib/auth";
 import {
-  compressChapters,
+  compressChaptersWithContext,
   assembleBook,
 } from "@/lib/pipeline/compress-chapters";
 
@@ -79,15 +79,16 @@ export async function POST(
 
 /**
  * Process book in background
- * This runs the chapter-based compression pipeline
+ * This runs the sequential chapter compression pipeline with context passing
  */
 async function processBookInBackground(bookId: string): Promise<void> {
   try {
     await connectDB();
 
-    // Step 1: Compress chapters (70% progress)
+    // Step 1: Compress chapters sequentially with context (70% progress)
+    // Uses adaptive compression based on content density analysis
     await updateBookStatus(bookId, "compressing_chapters", 5);
-    await compressChapters({
+    await compressChaptersWithContext({
       bookId,
       onProgress: async (step, current, total) => {
         const progress = 5 + Math.round((current / total) * 65);

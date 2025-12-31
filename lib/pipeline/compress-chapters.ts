@@ -190,6 +190,194 @@ export async function compressChapters({
 }
 
 /**
+ * Compress chapters sequentially with context passing for narrative continuity
+ * Uses adaptive compression based on content density
+ */
+export async function compressChaptersWithContext({
+  bookId,
+  onProgress,
+}: CompressChaptersOptions): Promise<CompressResult> {
+  const book = await Book.findById(bookId);
+  if (!book) {
+    throw new Error("Book not found");
+  }
+
+  const chapters = await Chapter.find({ bookId }).sort({ order: 1 });
+  if (chapters.length === 0) {
+    throw new Error("No chapters found for this book");
+  }
+
+  console.log(`[Compress] Starting SEQUENTIAL compression of ${chapters.length} chapters with context`);
+  const startTime = Date.now();
+
+  // Get compression settings from book (with defaults)
+  const compressionRatio = book.recommendedCompression || 0.35;
+  const contextSize = book.recommendedContextSize || 180;
+
+  console.log(`[Compress] Using compression ratio: ${(compressionRatio * 100).toFixed(0)}%, context size: ${contextSize} words`);
+
+  let runningContext = "";
+  let originalTokens = 0;
+  let compressedTokens = 0;
+  let successCount = 0;
+
+  // Process chapters sequentially for context continuity
+  for (let i = 0; i < chapters.length; i++) {
+    const chapter = chapters[i];
+    onProgress?.("Compressing chapters", i + 1, chapters.length);
+
+    try {
+      let result: { compressed_content: string; key_insights: string[]; chapter_summary: string };
+
+      // Handle large chapters by splitting
+      if (chapter.originalTokenCount > MAX_TOKENS_PER_CALL) {
+        console.log(`[Compress] Chapter ${i + 1} is large (${chapter.originalTokenCount} tokens), splitting...`);
+        result = await compressLargeChapterWithContext(
+          chapter,
+          book.title,
+          i === 0,
+          runningContext,
+          compressionRatio
+        );
+      } else {
+        // Normal compression with context
+        const prompt = buildChapterCompressionPromptWithContext(
+          chapter.title,
+          chapter.originalContent,
+          book.title,
+          i === 0,
+          runningContext,
+          compressionRatio
+        );
+
+        result = await generateStructured(
+          ChapterCompressionWithSummarySchema,
+          prompt,
+          { model: "reasoning" }
+        );
+      }
+
+      const compressedTokenCount = estimateTokens(result.compressed_content);
+
+      // Update chapter in database
+      await Chapter.findByIdAndUpdate(chapter._id, {
+        $set: {
+          compressedContent: result.compressed_content,
+          keyInsights: result.key_insights,
+          compressedTokenCount,
+          previousContext: runningContext,
+          chapterSummary: result.chapter_summary,
+        },
+      });
+
+      console.log(
+        `[Compress] Chapter ${i + 1}/${chapters.length}: "${chapter.title}" - ${chapter.originalTokenCount} -> ${compressedTokenCount} tokens (${((compressedTokenCount / chapter.originalTokenCount) * 100).toFixed(0)}%)`
+      );
+
+      // Update running context for next chapter
+      runningContext = await generateResponse(
+        buildRunningContextPrompt(
+          book.title,
+          runningContext,
+          chapter.title,
+          result.chapter_summary,
+          result.key_insights,
+          contextSize
+        ),
+        { model: "extraction" } // Use cheaper model for context generation
+      );
+
+      originalTokens += chapter.originalTokenCount;
+      compressedTokens += compressedTokenCount;
+      successCount++;
+    } catch (error) {
+      console.error(`[Compress] Error on chapter ${i + 1}:`, error);
+      // Continue with next chapter, keeping current context
+    }
+  }
+
+  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+  console.log(`[Compress] Completed: ${successCount}/${chapters.length} chapters in ${elapsed}s`);
+  console.log(
+    `[Compress] Compression: ${originalTokens} -> ${compressedTokens} tokens (${((compressedTokens / originalTokens) * 100).toFixed(1)}%)`
+  );
+
+  // Update book status
+  await Book.findByIdAndUpdate(bookId, {
+    $set: {
+      status: "assembling",
+      currentStep: "Chapters compressed",
+    },
+  });
+
+  return {
+    chaptersCompressed: successCount,
+    originalTokens,
+    compressedTokens,
+    compressionRatio: compressedTokens / originalTokens,
+  };
+}
+
+/**
+ * Compress a large chapter by splitting into parts and processing with context
+ */
+async function compressLargeChapterWithContext(
+  chapter: IChapter,
+  bookTitle: string,
+  isFirstChapter: boolean,
+  previousContext: string,
+  compressionRatio: number
+): Promise<{ compressed_content: string; key_insights: string[]; chapter_summary: string }> {
+  const parts = splitLargeChapter({
+    order: chapter.order,
+    title: chapter.title,
+    level: chapter.level,
+    content: chapter.originalContent,
+    tokenCount: chapter.originalTokenCount,
+  });
+
+  console.log(`[Compress] Split large chapter into ${parts.length} parts`);
+
+  const partResults: { compressed: string; insights: string[]; summary: string }[] = [];
+  let partContext = previousContext;
+
+  // Process parts sequentially to maintain continuity within chapter
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i];
+    const prompt = buildChapterCompressionPromptWithContext(
+      part.title,
+      part.content,
+      bookTitle,
+      isFirstChapter && i === 0,
+      partContext,
+      compressionRatio
+    );
+
+    const result = await generateStructured(
+      ChapterCompressionWithSummarySchema,
+      prompt,
+      { model: "reasoning" }
+    );
+
+    partResults.push({
+      compressed: result.compressed_content,
+      insights: result.key_insights,
+      summary: result.chapter_summary,
+    });
+
+    // Use this part's summary as context for next part
+    partContext = result.chapter_summary;
+  }
+
+  // Combine results
+  return {
+    compressed_content: partResults.map((r) => r.compressed).join("\n\n"),
+    key_insights: [...new Set(partResults.flatMap((r) => r.insights))].slice(0, 5),
+    chapter_summary: partResults[partResults.length - 1].summary,
+  };
+}
+
+/**
  * Assemble compressed chapters into final markdown output
  * Uses incremental assembly to handle books of any size
  */

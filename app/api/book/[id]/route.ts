@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { connectDB } from "@/lib/db";
-import { Book, Chunk, Claim, Idea, FinalOutput } from "@/models";
+import { Book, Chapter, Chunk, Claim, Idea, FinalOutput } from "@/models";
 import { getCurrentUser } from "@/lib/auth";
+import { getDensityLevel } from "@/lib/content-analyzer";
 
 export async function GET(
   request: NextRequest,
@@ -32,9 +33,21 @@ export async function GET(
       );
     }
 
+    // Add computed fields for UI display
+    const bookObj = book.toObject();
+    const bookData = {
+      ...bookObj,
+      contentDensityLevel: book.contentDensityScore
+        ? getDensityLevel(book.contentDensityScore)
+        : undefined,
+      compressionTargetLabel: book.recommendedCompression
+        ? `${Math.round(book.recommendedCompression * 100)}%`
+        : undefined,
+    };
+
     return NextResponse.json({
       success: true,
-      data: book,
+      data: bookData,
     });
   } catch (err) {
     console.error("Get book error:", err);
@@ -76,6 +89,7 @@ export async function DELETE(
 
     // Delete all related data
     await Promise.all([
+      Chapter.deleteMany({ bookId: id }),
       Chunk.deleteMany({ bookId: id }),
       Claim.deleteMany({ bookId: id }),
       Idea.deleteMany({ bookId: id }),

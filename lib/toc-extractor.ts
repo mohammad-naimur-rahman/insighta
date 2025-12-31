@@ -9,8 +9,8 @@ export const TOCEntrySchema = z.object({
   normalized_title: z
     .string()
     .describe("Cleaned version without chapter numbers, page numbers, or dots for matching"),
-  page_number: z.number().optional().describe("Page number if visible in TOC"),
-  level: z
+  page_number: z.coerce.number().optional().describe("Page number if visible in TOC"),
+  level: z.coerce
     .number()
     .describe("Hierarchy level: 1=Part/Book, 2=Chapter, 3=Section/Subsection"),
 });
@@ -21,8 +21,8 @@ export const TOCEntrySchema = z.object({
 export const TOCExtractionSchema = z.object({
   has_toc: z.boolean().describe("Whether a clear Table of Contents was found"),
   entries: z.array(TOCEntrySchema).describe("TOC entries found, in order"),
-  toc_start_page: z.number().optional().describe("Approximate page where TOC starts"),
-  toc_end_page: z.number().optional().describe("Approximate page where TOC ends"),
+  toc_start_page: z.coerce.number().optional().describe("Approximate page where TOC starts"),
+  toc_end_page: z.coerce.number().optional().describe("Approximate page where TOC ends"),
   confidence: z
     .enum(["high", "medium", "low"])
     .describe("Confidence in TOC detection accuracy"),
